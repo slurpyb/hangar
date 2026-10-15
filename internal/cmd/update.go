@@ -18,8 +18,8 @@ func newUpdateCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "update [skill]",
-		Short: "Update installed skills to their latest version",
+		Use:   "update [kind:name|name]",
+		Short: "Update installed content to its latest version",
 		Long: "Re-resolve installed skills: auto entries move to the latest tag, pinned\n" +
 			"entries are re-fetched at their exact ref. Rewritten tags are flagged.\n" +
 			"With a skill name, only that skill is updated.",
@@ -53,7 +53,7 @@ func newUpdateCmd() *cobra.Command {
 				fmt.Fprintln(w, "everything up to date")
 			default:
 				for _, sr := range rep.Skills {
-					fmt.Fprintf(w, "updated %s\n", sr.Name)
+					fmt.Fprintf(w, "updated %s:%s\n", sr.Kind, sr.Name)
 				}
 			}
 			for _, name := range rep.Gone {

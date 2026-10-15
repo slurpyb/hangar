@@ -27,7 +27,7 @@ func (s *infoListModel) enter(app *App) tea.Cmd {
 	if !s.ready {
 		s.filter = textinput.New()
 		s.filter.Prompt = "/ "
-		s.filter.Placeholder = "filter skills"
+		s.filter.Placeholder = "filter content"
 		s.ready = true
 	}
 	s.rebuild(app)
@@ -41,7 +41,7 @@ func (s *infoListModel) rebuild(app *App) {
 	s.rows = s.rows[:0]
 	for i := range app.discovered.Skills {
 		sk := &app.discovered.Skills[i]
-		if q == "" || strings.Contains(strings.ToLower(sk.Name), q) ||
+		if q == "" || strings.Contains(strings.ToLower(sk.Key()), q) ||
 			strings.Contains(strings.ToLower(sk.Description), q) ||
 			strings.Contains(strings.ToLower(sk.RelPath), q) {
 			s.rows = append(s.rows, i)
@@ -101,7 +101,7 @@ func (s *infoListModel) update(app *App, msg tea.Msg) tea.Cmd {
 
 func (s *infoListModel) view(app *App) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Select a skill to inspect"))
+	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Select content to inspect"))
 	if s.filtering || s.filter.Value() != "" {
 		fmt.Fprintf(&b, "%s\n", s.filter.View())
 	}
@@ -123,7 +123,7 @@ func (s *infoListModel) view(app *App) string {
 	for i := s.offset; i < end; i++ {
 		sk := app.discovered.Skills[s.rows[i]]
 		cursor := "  "
-		name := sk.Name
+		name := sk.Key()
 		if i == s.cursor {
 			cursor = app.th.cursor.Render("▸ ")
 			name = app.th.selected.Render(name)
@@ -131,7 +131,7 @@ func (s *infoListModel) view(app *App) string {
 		fmt.Fprintf(&b, "%s%-26s %s\n", cursor, name, app.th.faint.Render(truncate(sk.Description, app.width-32)))
 	}
 	if len(s.rows) == 0 {
-		fmt.Fprintf(&b, "%s\n", app.th.faint.Render("  (no matching skills)"))
+		fmt.Fprintf(&b, "%s\n", app.th.faint.Render("  (no matching content)"))
 	}
 
 	b.WriteString("\n")
@@ -300,7 +300,7 @@ func (s *infoDetailModel) metadata(app *App, w int) string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", app.th.title.Render(sk.Name))
+	fmt.Fprintf(&b, "%s\n", app.th.title.Render(sk.Key()))
 
 	src := app.discovered.Source
 	if app.discovered.Ref != "" {

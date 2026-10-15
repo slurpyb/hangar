@@ -77,10 +77,10 @@ func (s *confirmModel) update(app *App, msg tea.Msg) tea.Cmd {
 func (s *confirmModel) openFullList(app *App) {
 	var names []string
 	for _, sk := range app.selectedSkills() {
-		names = append(names, "• "+sk.Name)
+		names = append(names, "• "+sk.Key())
 	}
 	if len(names) == 0 {
-		names = []string{app.th.faint.Render("(no skills selected)")}
+		names = []string{app.th.faint.Render("(no content selected)")}
 	}
 	s.list.Width = maxInt(app.width-4, 10)
 	s.list.Height = maxInt(app.bodyHeight()-3, 3)
@@ -93,7 +93,7 @@ func (s *confirmModel) view(app *App) string {
 	if s.showAll {
 		var b strings.Builder
 		skills := app.selectedSkills()
-		fmt.Fprintf(&b, "%s\n", app.th.title.Render(fmt.Sprintf("Selected skills (%d)", len(skills))))
+		fmt.Fprintf(&b, "%s\n", app.th.title.Render(fmt.Sprintf("Selected content (%d)", len(skills))))
 		fmt.Fprintf(&b, "%s\n", app.th.border.Render(s.list.View()))
 		b.WriteString(app.helpView(
 			app.keys.Up, app.keys.Down,
@@ -106,13 +106,13 @@ func (s *confirmModel) view(app *App) string {
 	fmt.Fprintf(&b, "%s\n\n", app.th.title.Render("Review"))
 
 	skills := app.selectedSkills()
-	fmt.Fprintf(&b, "%s  %s\n", app.th.accent.Render(fmt.Sprintf("Skills (%d):", len(skills))), app.th.faint.Render("press f for the full list"))
+	fmt.Fprintf(&b, "%s  %s\n", app.th.accent.Render(fmt.Sprintf("Content (%d):", len(skills))), app.th.faint.Render("press f for the full list"))
 	for i, sk := range skills {
 		if i >= 6 {
 			fmt.Fprintf(&b, "%s\n", app.th.faint.Render(fmt.Sprintf("  … and %d more (f)", len(skills)-6)))
 			break
 		}
-		fmt.Fprintf(&b, "  • %s\n", sk.Name)
+		fmt.Fprintf(&b, "  • %s\n", sk.Key())
 	}
 	if len(skills) == 0 {
 		b.WriteString(app.th.faint.Render("  (none)\n"))
@@ -124,7 +124,7 @@ func (s *confirmModel) view(app *App) string {
 			app.th.faint.Render("README/docs added as agent references"))
 	}
 
-	fmt.Fprintf(&b, "\n%s ", app.th.accent.Render(fmt.Sprintf("Agents (%d):", len(app.chosen))))
+	fmt.Fprintf(&b, "\n%s ", app.th.accent.Render(fmt.Sprintf("Harnesses (%d):", len(app.chosen))))
 	if len(app.chosen) == 0 {
 		b.WriteString(app.th.faint.Render("(none — skills go to .agents/skills only)"))
 	} else {

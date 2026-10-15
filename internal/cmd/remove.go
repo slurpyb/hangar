@@ -14,9 +14,9 @@ func newRemoveCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "remove <skill>",
+		Use:     "remove <kind:name|name>",
 		Aliases: []string{"rm", "uninstall"},
-		Short:   "Remove an installed skill",
+		Short:   "Remove installed content",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			eng := engine.New()

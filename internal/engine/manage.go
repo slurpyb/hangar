@@ -150,6 +150,19 @@ func (e *Engine) Sync(ctx context.Context, opt InstallOptions) (install.Report, 
 	if len(lf.Skills) == 0 {
 		return install.Report{}, fmt.Errorf("the lockfile is empty — run `hangar install <source>` first")
 	}
+	if opt.Type != "" {
+		check := &Discovered{}
+		if err := check.Filter(opt.Type); err != nil {
+			return install.Report{}, err
+		}
+		var entries []lockfile.Entry
+		for _, entry := range lf.Skills {
+			if entry.Kind == opt.Type {
+				entries = append(entries, entry)
+			}
+		}
+		return e.installEntries(ctx, baseDir, entries, opt)
+	}
 	return e.installEntries(ctx, baseDir, lf.Skills, opt)
 }
 
@@ -172,7 +185,7 @@ func (e *Engine) Reinstall(ctx context.Context, names []string, opt InstallOptio
 	}
 	var targets []lockfile.Entry
 	for _, en := range lf.Skills {
-		if want[en.Name] {
+		if want[en.Key()] || want[en.Name] {
 			targets = append(targets, en)
 		}
 	}
@@ -238,7 +251,7 @@ func (e *Engine) groupEntries(entries []lockfile.Entry) []entryGroup {
 // findSkill returns the single discovered skill matching name (or nil).
 func findSkill(skills []Skill, name string) []Skill {
 	for i := range skills {
-		if skills[i].Name == name {
+		if skills[i].Key() == name || skills[i].Name == name {
 			return []Skill{skills[i]}
 		}
 	}
@@ -262,10 +275,19 @@ func pickRef(refs []discover.RefDoc, pkg, name string) []discover.RefDoc {
 // returned cleanup releases any such fallback download.
 func (e *Engine) resolveEntry(ctx context.Context, g entryGroup, d *Discovered, entry lockfile.Entry) (skills []Skill, refs []discover.RefDoc, meta install.SourceMeta, cleanup func(), err error) {
 	cleanup = func() {}
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		for _, sk := range d.Skills {
+			if sk.Type() == entry.Kind && sk.RelPath == entry.Subpath && (sk.Name == entry.Name || entry.Kind == lockfile.KindRule) {
+				sk.Name = entry.Name
+				return []Skill{sk}, nil, buildMeta(g.spec, d), cleanup, nil
+			}
+		}
+		return nil, nil, install.SourceMeta{}, cleanup, goneError(entry.Key(), fetch.ErrNotFound)
+	}
 	if entry.Kind == lockfile.KindRef {
 		refs = pickRef(d.References, g.spec.Pkg, entry.Name)
 	} else {
-		skills = findSkill(d.Skills, entry.Name)
+		skills = findSkill(d.Skills, entry.Key())
 	}
 	if skills != nil || refs != nil {
 		// meta.Subpath stays the crawl root (empty for a whole-source fetch); the
@@ -292,7 +314,7 @@ func (e *Engine) resolveEntry(ctx context.Context, g entryGroup, d *Discovered, 
 		refs = pickRef(ed.References, es.Pkg, entry.Name)
 	} else {
 		refs = nil
-		skills = findSkill(ed.Skills, entry.Name)
+		skills = findSkill(ed.Skills, entry.Key())
 	}
 	if skills == nil && refs == nil {
 		// The source resolved but no longer contains this skill/reference under
@@ -365,17 +387,30 @@ func (e *Engine) installEntries(ctx context.Context, baseDir string, entries []l
 				return rep, fmt.Errorf("reinstall %q: %w", entry.Name, err)
 			}
 
-			sub, _ := install.Install(install.Request{
+			entryAgents := agts
+			if len(opt.Agents) == 0 && len(entry.Harnesses) > 0 {
+				entryAgents, err = resolveAgents(entry.Harnesses, opt.Global)
+				if err != nil {
+					cleanup()
+					d.Close()
+					return rep, err
+				}
+			}
+			sub, installErr := install.Install(install.Request{
 				BaseDir:    baseDir,
 				Skills:     skills,
 				References: buildReferences(g.spec, refs),
-				Agents:     agts,
+				Agents:     entryAgents,
 				Options:    install.Options{Global: opt.Global, Security: opt.Security},
 				Operation:  audit.OpInstall,
 				Audit:      log,
 				Meta:       meta,
 			})
 			cleanup()
+			if installErr != nil {
+				d.Close()
+				return rep, installErr
+			}
 			rep.Skills = append(rep.Skills, sub.Skills...)
 			if sub.InstalledInstruction != "" {
 				rep.InstalledInstruction = sub.InstalledInstruction
@@ -405,13 +440,20 @@ func (e *Engine) Pin(ctx context.Context, name, ref string, opt InstallOptions) 
 	if err != nil {
 		return install.Report{}, err
 	}
-	entry, ok := lf.Find(name)
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return install.Report{}, err
+	}
 	if !ok {
 		return install.Report{}, fmt.Errorf("no installed skill named %q", name)
 	}
 
 	if ref == "" {
 		return install.Report{}, e.SetPinned(name, true, opt)
+	}
+
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		return install.Report{}, fmt.Errorf("pinning a new ref is not supported for %s; install source@ref with --type instead", entry.Kind)
 	}
 
 	s, err := e.specFromEntry(entry)
@@ -435,7 +477,7 @@ func (e *Engine) Pin(ctx context.Context, name, ref string, opt InstallOptions) 
 	if entry.Kind == lockfile.KindRef {
 		refs = d.References
 	} else {
-		skills = pickByName(d.Skills, name)
+		skills = pickByName(d.Skills, entry.Key())
 	}
 	return install.Install(install.Request{
 		BaseDir:    baseDir,
@@ -470,7 +512,7 @@ func (e *Engine) Nuke(opt InstallOptions) ([]string, error) {
 	// Snapshot names first; each Remove rewrites the lockfile.
 	names := make([]string, len(lf.Skills))
 	for i, e := range lf.Skills {
-		names[i] = e.Name
+		names[i] = e.Key()
 	}
 	var removed []string
 	for _, name := range names {
@@ -495,6 +537,13 @@ func (e *Engine) SetPinned(name string, pinned bool, opt InstallOptions) error {
 	if err != nil {
 		return err
 	}
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return err
+	}
+	if ok {
+		name = entry.Key()
+	}
 	if !lf.SetPinned(name, pinned) {
 		return fmt.Errorf("no installed skill named %q", name)
 	}
@@ -513,7 +562,10 @@ func (e *Engine) PreviewUpdate(ctx context.Context, name string, opt InstallOpti
 	if err != nil {
 		return "", err
 	}
-	entry, ok := lf.Find(name)
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return "", err
+	}
 	if !ok {
 		return "", fmt.Errorf("no installed skill named %q", name)
 	}
@@ -521,12 +573,42 @@ func (e *Engine) PreviewUpdate(ctx context.Context, name string, opt InstallOpti
 	if err != nil {
 		return "", err
 	}
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		s.Subpath, s.File, s.Skill = "", "", ""
+	}
 	d, err := e.Discover(ctx, s)
 	if err != nil {
 		return "", err
 	}
 	defer d.Close()
 
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		var selected *Skill
+		for i := range d.Skills {
+			if d.Skills[i].Type() == entry.Kind && d.Skills[i].RelPath == entry.Subpath && (d.Skills[i].Name == entry.Name || entry.Kind == lockfile.KindRule) {
+				selected = &d.Skills[i]
+				break
+			}
+		}
+		if selected == nil {
+			return "", fmt.Errorf("%s missing from source", entry.Key())
+		}
+		raw, err := discover.ReadContent(*selected)
+		if err != nil {
+			return "", err
+		}
+		installed := *selected
+		installed.AbsPath = install.StorePath(baseDir, entry)
+		if entry.Kind != lockfile.KindRule || entry.Manifest != "" {
+			installed.AbsPath = filepath.Join(installed.AbsPath, entry.Manifest)
+		}
+		old, err := discover.ReadContent(installed)
+		if err != nil {
+			return "", err
+		}
+		return diff.Unified(entry.Key(), entry.Key(), string(old), sanitize.Skill(string(raw), opt.Security), 3), nil
+	}
+	name = entry.Name
 	var newContent, oldPath string
 	if entry.Kind == lockfile.KindRef {
 		for _, doc := range d.References {
@@ -539,7 +621,7 @@ func (e *Engine) PreviewUpdate(ctx context.Context, name string, opt InstallOpti
 		oldPath = filepath.Join(baseDir, ".agents", "references", name, "REFERENCE.md")
 	} else {
 		for i := range d.Skills {
-			if d.Skills[i].Name == name {
+			if d.Skills[i].Key() == entry.Key() {
 				raw, _ := os.ReadFile(filepath.Join(d.Skills[i].AbsPath, "SKILL.md"))
 				newContent = sanitize.Skill(string(raw), opt.Security)
 				break
@@ -564,7 +646,10 @@ func (e *Engine) InstalledInfo(name string, global bool) (*Discovered, error) {
 	if err != nil {
 		return nil, err
 	}
-	entry, ok := lf.Find(name)
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, nil
 	}
@@ -573,6 +658,16 @@ func (e *Engine) InstalledInfo(name string, global bool) (*Discovered, error) {
 		ref = entry.Version
 	}
 	noop := func() error { return nil }
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		dir := install.StorePath(baseDir, entry)
+		abs := dir
+		if entry.Kind != lockfile.KindRule || entry.Manifest != "" {
+			abs = filepath.Join(dir, entry.Manifest)
+		}
+		sk := Skill{Name: entry.Name, Kind: entry.Kind, RelPath: entry.Subpath, AbsPath: abs}
+		return &Discovered{Skills: []Skill{sk}, Source: entry.Source, Ref: ref, Root: dir, cleanup: noop}, nil
+	}
+	name = entry.Name
 
 	if entry.Kind == lockfile.KindRef {
 		dir := filepath.Join(baseDir, ".agents", "references", name)
@@ -599,10 +694,22 @@ func (e *Engine) InstalledDoc(name string, global bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	entry, ok := lf.Find(name)
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return "", false, err
+	}
 	if !ok {
 		return "", false, nil
 	}
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		d, err := e.InstalledInfo(entry.Key(), global)
+		if err != nil {
+			return "", false, err
+		}
+		data, err := discover.ReadContent(d.Skills[0])
+		return string(data), err == nil, err
+	}
+	name = entry.Name
 	var p string
 	if entry.Kind == lockfile.KindRef {
 		p = filepath.Join(baseDir, ".agents", "references", name, "REFERENCE.md")

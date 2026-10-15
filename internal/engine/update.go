@@ -22,9 +22,19 @@ func (e *Engine) Update(ctx context.Context, name string, opt InstallOptions) (i
 		return install.Report{}, err
 	}
 
+	if name != "" {
+		en, ok, err := lf.Lookup(name)
+		if err != nil {
+			return install.Report{}, err
+		}
+		if !ok {
+			return install.Report{}, fmt.Errorf("no installed content named %q", name)
+		}
+		name = en.Key()
+	}
 	var targets []lockfile.Entry
 	for _, en := range lf.Skills {
-		if name == "" || en.Name == name {
+		if name == "" || en.Key() == name {
 			targets = append(targets, en)
 		}
 	}
@@ -48,7 +58,7 @@ func (e *Engine) UpdateNames(ctx context.Context, names []string, opt InstallOpt
 	}
 	var targets []lockfile.Entry
 	for _, en := range lf.Skills {
-		if want[en.Name] {
+		if want[en.Key()] || want[en.Name] {
 			targets = append(targets, en)
 		}
 	}
@@ -109,7 +119,7 @@ func (e *Engine) updateTargets(ctx context.Context, baseDir string, targets []lo
 			if s.Kind == spec.KindNPM {
 				current = entry.Version
 			}
-			if d.Ref == current && d.SHA == entry.SHA {
+			if s.Kind != spec.KindLocal && d.Ref == current && d.SHA == entry.SHA {
 				continue
 			}
 
@@ -127,17 +137,30 @@ func (e *Engine) updateTargets(ctx context.Context, baseDir string, targets []lo
 				d.Close()
 				return rep, fmt.Errorf("update %q: %w", entry.Name, err)
 			}
-			sub, _ := install.Install(install.Request{
+			entryAgents := agts
+			if len(opt.Agents) == 0 && len(entry.Harnesses) > 0 {
+				entryAgents, err = resolveAgents(entry.Harnesses, opt.Global)
+				if err != nil {
+					cleanup()
+					d.Close()
+					return rep, err
+				}
+			}
+			sub, installErr := install.Install(install.Request{
 				BaseDir:    baseDir,
 				Skills:     skills,
 				References: buildReferences(s, refs),
-				Agents:     agts,
+				Agents:     entryAgents,
 				Options:    install.Options{Global: opt.Global, Security: opt.Security},
 				Operation:  audit.OpUpdate,
 				Audit:      log,
 				Meta:       meta,
 			})
 			cleanup()
+			if installErr != nil {
+				d.Close()
+				return rep, installErr
+			}
 			rep.Skills = append(rep.Skills, sub.Skills...)
 			if sub.InstalledInstruction != "" {
 				rep.InstalledInstruction = sub.InstalledInstruction
@@ -160,7 +183,7 @@ func (e *Engine) specFromEntry(entry lockfile.Entry) (spec.SourceSpec, error) {
 			Kind:    spec.KindNPM,
 			Pkg:     strings.TrimPrefix(entry.Source, "npm:"),
 			Subpath: entry.Subpath,
-			File:    entry.File, // set for reference entries; "" for skills
+			File:    entry.File, // set for reference entries; "" for other kinds
 			Pinned:  entry.Pinned,
 		}
 		if entry.Pinned {
@@ -171,7 +194,7 @@ func (e *Engine) specFromEntry(entry lockfile.Entry) (spec.SourceSpec, error) {
 		return spec.SourceSpec{
 			Kind:  spec.KindLocal,
 			Path:  strings.TrimPrefix(entry.Source, "file://"),
-			Skill: entry.Name,
+			Skill: entry.Key(),
 		}, nil
 	case strings.HasPrefix(entry.Source, "http://"), strings.HasPrefix(entry.Source, "https://"):
 		if hs, err := spec.ParseWithForges(entry.Source, e.hostForges); err == nil && hs.Kind == spec.KindHTTP {
@@ -236,7 +259,7 @@ func specFromForgeURL(source string, hosts map[string]spec.Forge) (spec.SourceSp
 
 func pickByName(skills []Skill, name string) []Skill {
 	for _, s := range skills {
-		if s.Name == name {
+		if s.Key() == name || s.Name == name {
 			return []Skill{s}
 		}
 	}

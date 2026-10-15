@@ -10,12 +10,12 @@ import (
 func newInfoCmd() *cobra.Command {
 	var global bool
 	cmd := &cobra.Command{
-		Use:   "info <skill|source>",
-		Short: "Inspect a skill: metadata + rendered SKILL.md",
-		Long: "Browse a skill's metadata and rendered SKILL.md. The argument is first\n" +
-			"matched against an installed skill by name; otherwise it is treated as a\n" +
+		Use:   "info <kind:name|name|source>",
+		Short: "Preview installed content (kind:name) or a source",
+		Long: "Browse content metadata and its authored instructions. The argument is first\n" +
+			"matched against installed content by name; otherwise it is treated as a\n" +
 			"source (owner/repo, tangled:owner/repo, npm:pkg, a bare HTTP(S) URL, or a\n" +
-			"local path). A source with several skills\n" +
+			"local path). A source with several items\n" +
 			"opens a selectable list. On a terminal this is an interactive viewer; piped\n" +
 			"or with --no-tty it prints instead.",
 		Args: cobra.ExactArgs(1),
@@ -38,7 +38,7 @@ func newInfoCmd() *cobra.Command {
 			if len(d.Skills) == 0 {
 				src := d.Source
 				_ = d.Close()
-				return fmt.Errorf("no skills found in %s", src)
+				return fmt.Errorf("no content found in %s", src)
 			}
 
 			if interactive(false) {
@@ -58,7 +58,7 @@ func printInfoHeadless(c *cobra.Command, eng *engine.Engine, d *engine.Discovere
 	w := c.OutOrStdout()
 	if len(d.Skills) == 1 {
 		sk := d.Skills[0]
-		fmt.Fprintln(w, sk.Name)
+		fmt.Fprintln(w, sk.Key())
 		src := d.Source
 		if d.Ref != "" {
 			src += "@" + d.Ref
@@ -70,15 +70,17 @@ func printInfoHeadless(c *cobra.Command, eng *engine.Engine, d *engine.Discovere
 		if sk.Description != "" {
 			fmt.Fprintf(w, "\n%s\n", sk.Description)
 		}
-		if doc, err := eng.ReadSkillDoc(sk); err == nil {
-			fmt.Fprintf(w, "\n%s\n", doc.Body)
+		doc, err := eng.ReadSkillDoc(sk)
+		if err != nil {
+			return err
 		}
+		fmt.Fprintf(w, "\n%s\n", doc.Body)
 		return nil
 	}
 
-	fmt.Fprintf(w, "%s — %d skills:\n", d.Source, len(d.Skills))
+	fmt.Fprintf(w, "%s — %d items:\n", d.Source, len(d.Skills))
 	for _, sk := range d.Skills {
-		fmt.Fprintf(w, "  %-26s %s\n", sk.Name, sk.Description)
+		fmt.Fprintf(w, "  %-26s %s\n", sk.Key(), sk.Description)
 	}
 	fmt.Fprintln(w, "\npick one with owner/repo#<name> (or pass a single skill)")
 	return nil

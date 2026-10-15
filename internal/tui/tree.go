@@ -65,6 +65,9 @@ type treeModel struct {
 }
 
 func skillKey(sk *engine.Skill) string {
+	if sk.Type() != "skill" {
+		return sk.Type() + ":" + sk.RelPath + ":" + sk.Name
+	}
 	if sk.RelPath == "" {
 		return sk.Name
 	}
@@ -75,7 +78,7 @@ func (s *treeModel) enter(app *App) tea.Cmd {
 	if !s.ready {
 		s.filter = textinput.New()
 		s.filter.Prompt = "/ "
-		s.filter.Placeholder = "filter skills"
+		s.filter.Placeholder = "filter content"
 		s.preview = viewport.New(0, 0)
 		s.ready = true
 	}
@@ -421,7 +424,7 @@ func (s *treeModel) leftPane(app *App) string {
 		if s.listView {
 			view = "list"
 		}
-		fmt.Fprintf(&b, "%s\n", app.th.subtitle.Render("skills ("+view+" view)"))
+		fmt.Fprintf(&b, "%s\n", app.th.subtitle.Render("content ("+view+" view)"))
 	}
 
 	visible := s.listHeight(app)
@@ -433,7 +436,7 @@ func (s *treeModel) leftPane(app *App) string {
 		fmt.Fprintf(&b, "%s\n", s.rowView(app, s.rows[i], i == s.cursor))
 	}
 	if len(s.rows) == 0 {
-		fmt.Fprintf(&b, "%s\n", app.th.faint.Render("  (no matching skills)"))
+		fmt.Fprintf(&b, "%s\n", app.th.faint.Render("  (no matching content)"))
 	}
 	return b.String()
 }
@@ -452,7 +455,7 @@ func (s *treeModel) rowView(app *App, r visRow, atCursor bool) string {
 	var label string
 	switch {
 	case n.isSkill:
-		label = n.label
+		label = "[" + n.skill.Type() + "] " + n.label
 	case n.expanded:
 		label = "▾ " + n.label
 	default:

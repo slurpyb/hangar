@@ -10,22 +10,23 @@ import (
 
 func newListCmd() *cobra.Command {
 	var (
-		asJSON bool
-		global bool
+		contentType string
+		asJSON      bool
+		global      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list [source]",
-		Short: "List installed skills, or the skills available in a source",
-		Long: "With no argument, manage the skills installed here: on a terminal this\n" +
+		Short: "List installed content or browse a source",
+		Long: "With no argument, manage the content installed here: on a terminal this\n" +
 			"opens an interactive list (update or remove with a keypress); otherwise it\n" +
 			"prints them. With a source (owner/repo, tangled:owner/repo, npm:pkg, a\n" +
-			"bare HTTP(S) URL, a subpath, or a local path), list the skills that source\n" +
+			"bare HTTP(S) URL, a subpath, or a local path), list the content that source\n" +
 			"contains.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w := c.OutOrStdout()
 			if len(args) == 0 {
-				return listInstalled(c, global, asJSON)
+				return listInstalled(c, global, asJSON, contentType)
 			}
 
 			eng := engine.New()
@@ -36,6 +37,11 @@ func newListCmd() *cobra.Command {
 
 			d, err := eng.Discover(c.Context(), s)
 			if err != nil {
+				return err
+			}
+
+			if err := d.Filter(contentType); err != nil {
+				d.Close()
 				return err
 			}
 
@@ -57,15 +63,15 @@ func newListCmd() *cobra.Command {
 			fmt.Fprintln(w, header)
 			for _, sk := range d.Skills {
 				if sk.Description != "" {
-					fmt.Fprintf(w, "  %-28s %s\n", sk.Name, sk.Description)
+					fmt.Fprintf(w, "  %-28s %s\n", sk.Key(), sk.Description)
 				} else {
-					fmt.Fprintf(w, "  %s\n", sk.Name)
+					fmt.Fprintf(w, "  %s\n", sk.Key())
 				}
 			}
 			for _, r := range d.References {
 				fmt.Fprintf(w, "  %-28s %s\n", "[ref]", r.RelPath)
 			}
-			fmt.Fprintf(w, "\n%d skill(s)", len(d.Skills))
+			fmt.Fprintf(w, "\n%d content item(s)", len(d.Skills))
 			if len(d.References) > 0 {
 				fmt.Fprintf(w, ", %d reference(s)", len(d.References))
 			}
@@ -73,6 +79,7 @@ func newListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&contentType, "type", "", "filter source by skill, ref, agent, rule, or prompt")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
 	cmd.Flags().BoolVarP(&global, "global", "g", false, "list the global (~/) install")
 	return cmd
@@ -80,8 +87,8 @@ func newListCmd() *cobra.Command {
 
 // listInstalled handles `hangar list` with no source: the interactive manage
 // screen on a terminal, or a printed/JSON listing when headless.
-func listInstalled(c *cobra.Command, global, asJSON bool) error {
-	if interactive(false) && !asJSON {
+func listInstalled(c *cobra.Command, global, asJSON bool, contentType string) error {
+	if interactive(false) && !asJSON && contentType == "" {
 		return runManageTUI(c, global)
 	}
 
@@ -89,6 +96,19 @@ func listInstalled(c *cobra.Command, global, asJSON bool) error {
 	statuses, err := eng.CheckUpdates(c.Context(), global)
 	if err != nil {
 		return err
+	}
+	if contentType != "" {
+		check := &engine.Discovered{}
+		if err := check.Filter(contentType); err != nil {
+			return err
+		}
+		var filtered []engine.InstalledStatus
+		for _, st := range statuses {
+			if st.Entry.Kind == contentType {
+				filtered = append(filtered, st)
+			}
+		}
+		statuses = filtered
 	}
 	w := c.OutOrStdout()
 	if asJSON {
@@ -104,10 +124,7 @@ func listInstalled(c *cobra.Command, global, asJSON bool) error {
 	fmt.Fprintf(w, format, "NAME", "KIND", "STATUS", "SOURCE")
 	fmt.Fprintf(w, format, "----", "----", "------", "------")
 	for _, st := range statuses {
-		kind := "skill"
-		if st.Entry.Kind == "ref" {
-			kind = "ref"
-		}
+		kind := st.Entry.Kind
 		status := "up to date"
 		switch {
 		case st.Gone:

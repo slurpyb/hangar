@@ -25,6 +25,7 @@ type Skill struct {
 	Description string
 	RelPath     string // directory path relative to the crawl root, e.g. "document-skills/pdf"
 	AbsPath     string // on-disk directory containing the skill
+	Kind        string // empty means skill (backward compatible)
 	IsRef       bool
 
 	// FrontmatterRaw is the verbatim YAML frontmatter block (without the ---

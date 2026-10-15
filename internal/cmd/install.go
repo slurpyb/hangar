@@ -14,24 +14,25 @@ import (
 
 func newInstallCmd() *cobra.Command {
 	var (
-		agentNames []string
-		global     bool
-		all        bool
-		yes        bool
-		noTTY      bool
-		asJSON     bool
-		verbose    bool
-		sec        securityFlags
+		contentType string
+		agentNames  []string
+		global      bool
+		all         bool
+		yes         bool
+		noTTY       bool
+		asJSON      bool
+		verbose     bool
+		sec         securityFlags
 	)
 
 	cmd := &cobra.Command{
 		Use:   "install [source]",
-		Short: "Install skills from a source (or reinstall from the lockfile)",
-		Long: "Install Agent Skills from a git repo (GitHub owner/repo, Tangled\n" +
+		Short: "Install skills, agents, rules, prompts, or references",
+		Long: "Install content from a git repo (GitHub owner/repo, Tangled\n" +
 			"tangled:owner/repo, or a GitLab/Bitbucket/Forgejo URL), an npm package\n" +
 			"(npm:pkg), a bare HTTP(S) URL to a single skill file, or a local path. On\n" +
 			"a terminal the interactive\n" +
-			"picker opens when a source has multiple skills; pass --all or -y to install\n" +
+			"picker opens when a source has multiple content items; pass --all or -y to install\n" +
 			"headless.\n\n" +
 			"With no source, reinstall everything recorded in .agents/hangar.lock — handy\n" +
 			"after cloning a repo that commits its lockfile.",
@@ -45,6 +46,7 @@ func newInstallCmd() *cobra.Command {
 				p := newProgress(c.ErrOrStderr(), verbose)
 				p.start()
 				rep, err := eng.Sync(c.Context(), engine.InstallOptions{
+					Type:       contentType,
 					Agents:     agentNames,
 					Global:     global,
 					Security:   secOpt,
@@ -70,6 +72,10 @@ func newInstallCmd() *cobra.Command {
 					return err
 				}
 				// A single (or zero) skill is unambiguous — install directly.
+				if err := d.Filter(contentType); err != nil {
+					d.Close()
+					return err
+				}
 				if len(d.Skills) <= 1 {
 					defer d.Close()
 					rep, err := installSelectedHeadless(eng, d, s, agentNames, global, secOpt)
@@ -85,6 +91,7 @@ func newInstallCmd() *cobra.Command {
 			p := newProgress(c.ErrOrStderr(), verbose)
 			p.start()
 			rep, err := eng.Install(c.Context(), s, engine.InstallOptions{
+				Type:       contentType,
 				Agents:     agentNames,
 				Global:     global,
 				All:        all,
@@ -100,9 +107,10 @@ func newInstallCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringArrayVarP(&agentNames, "agent", "a", nil, "target agent (repeatable); default: auto-detect")
+	cmd.Flags().StringVar(&contentType, "type", "", "select skill, ref, agent, rule, or prompt content")
+	cmd.Flags().StringArrayVarP(&agentNames, "agent", "a", nil, "target harness application (repeatable); default: auto-detect")
 	cmd.Flags().BoolVarP(&global, "global", "g", false, "install into ~/ (global) instead of the current project")
-	cmd.Flags().BoolVarP(&all, "all", "A", false, "install every skill the source contains")
+	cmd.Flags().BoolVarP(&all, "all", "A", false, "install every selected content item")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept without the interactive picker")
 	cmd.Flags().BoolVar(&noTTY, "no-tty", false, "never open the interactive picker")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON (implies headless)")
@@ -114,6 +122,9 @@ func newInstallCmd() *cobra.Command {
 // installSelectedHeadless installs an already-discovered, unambiguous source
 // without a picker, resolving target agents (explicit -a or auto-detected).
 func installSelectedHeadless(eng *engine.Engine, d *engine.Discovered, s spec.SourceSpec, agentNames []string, global bool, secOpt sanitize.Opts) (install.Report, error) {
+	if len(d.Skills) == 0 && len(d.References) == 0 {
+		return install.Report{}, fmt.Errorf("no selected content found")
+	}
 	var agts []engine.Agent
 	var err error
 	if len(agentNames) > 0 {
@@ -145,7 +156,7 @@ func printReport(c *cobra.Command, rep install.Report) {
 			fmt.Fprintf(w, "added reference %s\n", sr.Name)
 			continue
 		}
-		fmt.Fprintf(w, "installed %s\n", sr.Name)
+		fmt.Fprintf(w, "installed %s:%s\n", sr.Kind, sr.Name)
 		for agent, reason := range sr.FailedAgents {
 			fmt.Fprintf(w, "  ! %s: %s\n", agent, reason)
 		}
