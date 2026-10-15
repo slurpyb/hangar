@@ -27,9 +27,9 @@ var (
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "hangar",
-		Short: "A TUI package manager for AI agent skills",
-		Long: "Hangar discovers Agent Skills (SKILL.md) in GitHub repositories and npm\n" +
-			"packages and installs them into the AI coding agents on your machine.\n\n" +
+		Short: "A TUI package manager for AI harness content",
+		Long: "Hangar discovers skills, references, agents, rules, and prompts in source\n" +
+			"repositories and installs them into the AI harnesses on your machine.\n\n" +
 			"Run `hangar` with no arguments to browse interactively.",
 		SilenceUsage:  true,
 		SilenceErrors: true, // Execute prints errors itself, skipping errSilent
@@ -55,6 +55,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newCompileRulesCmd())
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newRemoveCmd())
 	root.AddCommand(newDoctorCmd())

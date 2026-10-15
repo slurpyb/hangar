@@ -16,6 +16,7 @@ import (
 
 // InstallOptions configures a headless install via the engine.
 type InstallOptions struct {
+	Type       string   // optional content-kind filter
 	Agents     []string // explicit agent names; empty => auto-detect
 	Global     bool
 	All        bool   // install every discovered skill
@@ -36,6 +37,9 @@ func (e *Engine) Install(ctx context.Context, s spec.SourceSpec, opt InstallOpti
 		return install.Report{}, err
 	}
 	defer d.Close()
+	if err := d.Filter(opt.Type); err != nil {
+		return install.Report{}, err
+	}
 
 	selected, err := selectSkills(d.Skills, d.References, opt)
 	if err != nil {
@@ -99,12 +103,12 @@ func selectSkills(all []Skill, refs []discover.RefDoc, opt InstallOptions) ([]Sk
 		if len(refs) > 0 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("no skills found")
+		return nil, fmt.Errorf("no content found")
 	case opt.All, opt.Yes, len(all) == 1:
 		// --all and --yes both mean "take everything without a picker".
 		return all, nil
 	default:
-		return nil, fmt.Errorf("source has %d skills; pass --all to install all, -y to accept, or select one with #name", len(all))
+		return nil, fmt.Errorf("source has %d content items; pass --all to install all, -y to accept, or select one with #name", len(all))
 	}
 }
 

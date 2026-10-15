@@ -93,7 +93,7 @@ func (s *manageModel) reload(app *App) error {
 // attachFromCache points each row at its cached status (nil if none).
 func (s *manageModel) attachFromCache() {
 	for i := range s.rows {
-		if st, ok := s.statusCache[s.rows[i].entry.Name]; ok {
+		if st, ok := s.statusCache[s.rows[i].entry.Key()]; ok {
 			cp := st
 			s.rows[i].status = &cp
 		} else {
@@ -215,7 +215,7 @@ func (s *manageModel) handleKey(app *App, msg tea.KeyMsg) tea.Cmd {
 		return s.updateAll(app)
 	case msg.String() == "x" || msg.String() == "d":
 		if r := s.cur(); r != nil {
-			s.confirmRemove = r.entry.Name
+			s.confirmRemove = r.entry.Key()
 			s.note = ""
 		}
 	case msg.String() == "p":
@@ -236,7 +236,7 @@ func (s *manageModel) togglePin(app *App) tea.Cmd {
 		return nil
 	}
 	pinned := !r.entry.Pinned
-	if err := app.eng.SetPinned(r.entry.Name, pinned, engine.InstallOptions{Global: app.global}); err != nil {
+	if err := app.eng.SetPinned(r.entry.Key(), pinned, engine.InstallOptions{Global: app.global}); err != nil {
 		s.note = "error: " + err.Error()
 		return nil
 	}
@@ -244,7 +244,7 @@ func (s *manageModel) togglePin(app *App) tea.Cmd {
 	if !pinned {
 		verb = "unpinned"
 	}
-	s.note = verb + " " + r.entry.Name
+	s.note = verb + " " + r.entry.Key()
 	_ = s.reload(app)
 	return nil
 }
@@ -255,12 +255,12 @@ func (s *manageModel) previewDiff(app *App) tea.Cmd {
 		return nil
 	}
 	if r.entry.Pinned {
-		s.note = r.entry.Name + " is pinned — nothing to update"
+		s.note = r.entry.Key() + " is pinned — nothing to update"
 		return nil
 	}
 	s.busy = true
-	s.busyMsg = "computing diff for " + r.entry.Name
-	name := r.entry.Name
+	s.busyMsg = "computing diff for " + r.entry.Key()
+	name := r.entry.Key()
 	ctx := app.startOp()
 	return tea.Batch(s.sp.Tick, func() tea.Msg {
 		d, err := app.eng.PreviewUpdate(ctx, name, engine.InstallOptions{Global: app.global, Security: app.security})
@@ -281,9 +281,9 @@ func (s *manageModel) updateOne(app *App) tea.Cmd {
 		return nil
 	}
 	s.busy = true
-	s.busyMsg = "updating " + r.entry.Name
+	s.busyMsg = "updating " + r.entry.Key()
 	ctx := app.startOp()
-	return tea.Batch(s.sp.Tick, manageUpdateCmd(ctx, app.eng, r.entry.Name, app.global))
+	return tea.Batch(s.sp.Tick, manageUpdateCmd(ctx, app.eng, r.entry.Key(), app.global))
 }
 
 func (s *manageModel) updateAll(app *App) tea.Cmd {
@@ -292,7 +292,7 @@ func (s *manageModel) updateAll(app *App) tea.Cmd {
 	var names []string
 	for i := range s.rows {
 		if st := s.rows[i].status; st != nil && st.Outdated {
-			names = append(names, s.rows[i].entry.Name)
+			names = append(names, s.rows[i].entry.Key())
 		}
 	}
 	if len(names) == 0 {
@@ -311,7 +311,7 @@ func (s *manageModel) attach(statuses []engine.InstalledStatus) {
 		s.statusCache = map[string]engine.InstalledStatus{}
 	}
 	for _, st := range statuses {
-		s.statusCache[st.Entry.Name] = st
+		s.statusCache[st.Entry.Key()] = st
 	}
 	s.attachFromCache()
 }
@@ -324,8 +324,8 @@ func (s *manageModel) markUpToDate(app *App, name string) {
 		return
 	}
 	for _, e := range entries {
-		if name == "" || e.Name == name {
-			s.statusCache[e.Name] = engine.InstalledStatus{Entry: e, Outdated: false, Latest: entryRefLabel(e)}
+		if name == "" || e.Key() == name {
+			s.statusCache[e.Key()] = engine.InstalledStatus{Entry: e, Outdated: false, Latest: entryRefLabel(e)}
 		}
 	}
 }
@@ -347,7 +347,7 @@ func (s *manageModel) view(app *App) string {
 	if app.global {
 		scope = "global (~/)"
 	}
-	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Installed skills — "+scope))
+	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Installed content — "+scope))
 
 	if len(s.rows) == 0 {
 		fmt.Fprintf(&b, "%s\n\n", app.th.faint.Render("  nothing installed yet — run `hangar install <source>`"))
@@ -436,15 +436,12 @@ func (s *manageModel) rowView(app *App, r manageRow, atCursor bool) string {
 		cursor = app.th.cursor.Render("▸ ")
 	}
 
-	name := fmt.Sprintf("%-*s", mgNameW, truncate(r.entry.Name, mgNameW))
+	name := fmt.Sprintf("%-*s", mgNameW, truncate(r.entry.Key(), mgNameW))
 	if atCursor {
 		name = app.th.selected.Render(name)
 	}
 
-	kind := "skill"
-	if r.entry.Kind == lockfile.KindRef {
-		kind = "ref"
-	}
+	kind := r.entry.Kind
 
 	statusText, statusStyle := s.statusCell(app, r)
 	status := statusStyle.Render(fmt.Sprintf("%-*s", mgStatusW, truncate(statusText, mgStatusW)))

@@ -214,7 +214,7 @@ func (s *profileDetailModel) update(app *App, msg tea.Msg) tea.Cmd {
 		}
 	case k.String() == "x" || k.String() == "d":
 		if e := s.cur(); e != nil {
-			s.confirmRemove = e.Name
+			s.confirmRemove = e.Key()
 		}
 	case key.Matches(k, app.keys.Back):
 		return func() tea.Msg { return navBackMsg{} }
@@ -232,7 +232,7 @@ func (s *profileDetailModel) removeEntry(app *App, name string) tea.Cmd {
 	}
 	kept := make([]lockfile.Entry, 0, len(p.Skills))
 	for _, e := range p.Skills {
-		if e.Name != name {
+		if e.Key() != name {
 			kept = append(kept, e)
 		}
 	}
@@ -284,15 +284,12 @@ func (s *profileDetailModel) view(app *App) string {
 	for i := s.offset; i < end; i++ {
 		e := s.entries[i]
 		cursor := "  "
-		name := e.Name
+		name := e.Key()
 		if i == s.cursor {
 			cursor = app.th.cursor.Render("▸ ")
 			name = app.th.selected.Render(name)
 		}
-		kind := "skill"
-		if e.Kind == lockfile.KindRef {
-			kind = "ref"
-		}
+		kind := e.Kind
 		fmt.Fprintf(&b, "%s%-24s %s\n", cursor, name, app.th.faint.Render(kind+"  "+sourceRefLabel(e)))
 	}
 
@@ -300,10 +297,7 @@ func (s *profileDetailModel) view(app *App) string {
 	if e := s.cur(); e != nil {
 		fmt.Fprintf(&b, "\n%s\n", app.th.accent.Render("details"))
 		fmt.Fprintf(&b, "  %s %s\n", app.th.faint.Render("source:"), sourceRefLabel(*e))
-		kind := "skill"
-		if e.Kind == lockfile.KindRef {
-			kind = "ref"
-		}
+		kind := e.Kind
 		fmt.Fprintf(&b, "  %s %s\n", app.th.faint.Render("kind:  "), kind)
 		if e.Subpath != "" {
 			fmt.Fprintf(&b, "  %s %s\n", app.th.faint.Render("path:  "), e.Subpath)

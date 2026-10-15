@@ -305,8 +305,8 @@ func TestManageScreen(t *testing.T) {
 
 	// 'x' asks to confirm removal; the screen captures keys while confirming.
 	m.Update(keyMsg("x"))
-	if m.manage.confirmRemove != "pdf" {
-		t.Errorf("confirmRemove = %q, want pdf", m.manage.confirmRemove)
+	if m.manage.confirmRemove != "skill:pdf" {
+		t.Errorf("confirmRemove = %q, want skill:pdf", m.manage.confirmRemove)
 	}
 	if !m.manage.capturing() {
 		t.Error("manage should capture input while confirming a removal")

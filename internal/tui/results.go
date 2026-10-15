@@ -57,11 +57,11 @@ func (s *resultsModel) view(app *App) string {
 		if sr.Kind == lockfile.KindRef {
 			refs = append(refs, sr.Name)
 		} else {
-			skills = append(skills, sr.Name)
+			skills = append(skills, sr.Kind+":"+sr.Name)
 		}
 	}
 	if len(skills) > 0 {
-		fmt.Fprintf(&b, "%s%s\n", app.th.accent.Render("Installed skills: "), strings.Join(skills, ", "))
+		fmt.Fprintf(&b, "%s%s\n", app.th.accent.Render("Installed content: "), strings.Join(skills, ", "))
 	}
 	if len(refs) > 0 {
 		fmt.Fprintf(&b, "%s%s\n", app.th.accent.Render("Added references: "), strings.Join(refs, ", "))

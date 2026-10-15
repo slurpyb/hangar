@@ -1,8 +1,7 @@
 package engine
 
 import (
-	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/louisescher/hangar/internal/agents"
 	"github.com/louisescher/hangar/internal/discover"
@@ -18,19 +17,18 @@ type SkillDoc struct {
 	Body  string
 }
 
-// ReadSkillDoc loads a skill's manifest (SKILL.md, falling back to REFERENCE.md
-// for installed references) and returns its body for preview. The skill's
+// ReadSkillDoc loads authored content and returns its body for preview. The content's
 // AbsPath must still be on disk (true while its source's Discovered is open).
 func (e *Engine) ReadSkillDoc(sk Skill) (SkillDoc, error) {
-	data, err := os.ReadFile(filepath.Join(sk.AbsPath, "SKILL.md"))
+	data, err := discover.ReadContent(sk)
 	if err != nil {
-		var refErr error
-		data, refErr = os.ReadFile(filepath.Join(sk.AbsPath, "REFERENCE.md"))
-		if refErr != nil {
-			return SkillDoc{}, err
-		}
+		return SkillDoc{}, err
 	}
-	_, body := discover.SplitFrontmatter(data)
+	if sk.Type() == "rule" {
+		return SkillDoc{Skill: sk, Body: string(data)}, nil
+	}
+	fm, body := discover.SplitFrontmatter(data)
+	sk.FrontmatterRaw = strings.TrimSpace(string(fm))
 	return SkillDoc{Skill: sk, Body: string(body)}, nil
 }
 
@@ -49,4 +47,3 @@ func (e *Engine) ResolveAgents(names []string, global bool) ([]agents.Agent, err
 func (e *Engine) AgentDefs() []agents.Def {
 	return agents.Defs
 }
-

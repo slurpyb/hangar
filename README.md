@@ -4,14 +4,14 @@
 
 # Hangar ✈
 
-A TUI package manager for **Agent Skills** — the `SKILL.md` files that AI coding
-agents (Claude Code, Cursor, Copilot, opencode, Codex, Gemini CLI, and ~50
-others) load to extend their capabilities.
+A TUI package manager for **Agent Skills**, references, agent definitions,
+rules, and prompts. Existing skills work with Claude Code, Cursor, Copilot,
+opencode, Codex, Gemini CLI, and ~50 other harnesses. Agents, rules, and prompts
+use the native conventions of Pi, Codex, and Cursor where supported.
 
-Hangar discovers skills in **Git repositories** (GitHub, GitLab, Bitbucket,
-Forgejo/Gitea, Tangled, and self-hosted hosts) and **npm packages**, lets you
-pick exactly which ones to install through an interactive tree picker, and wires
-them into every agent on your machine that follows the `.agents/` convention.
+Hangar discovers content in **Git repositories**, **npm packages**, and local
+directories, lets you select it in an interactive picker, and installs it into
+your chosen harness applications.
 
 Inspired by [`withastro/rosie`](https://github.com/withastro/rosie), with a
 TUI-first workflow, subpath installs, real npm-registry fetching, a TOML
@@ -58,6 +58,183 @@ Or clone and build:
 git clone https://github.com/louisescher/hangar && cd hangar
 go build -o hangar .
 ```
+
+## Agents, rules, and prompts
+
+Hangar also manages installable **agent definitions**, **rules bundles**, and
+**prompt templates**. `--agent` / `-a` selects the **harness application** (Pi,
+Codex, or Cursor); an `agent` content item is a definition used by that
+application. Hangar does not install the applications themselves.
+
+### Supported formats and destinations
+
+Project paths are relative to the install directory; `~` means the home
+directory selected by `--global`. Skills still use the canonical
+`.agents/skills/<name>/` store, with per-harness links locally and copies
+globally. References remain in `.agents/references/<name>/REFERENCE.md` and
+are linked from the existing managed instruction block.
+
+| Harness | Content | Project destination | Global destination |
+| --- | --- | --- | --- |
+| Pi | Skill (`SKILL.md` directory) | `.pi/skills/<name>/` | `~/.pi/agent/skills/<name>/` |
+| Pi | Agent (`.md`, via `@tintinweb/pi-subagents`) | `.pi/agents/<name>.md` | `~/.pi/agent/agents/<name>.md` |
+| Pi | Rules (`.md` directory, compiled) | `.pi/APPEND_SYSTEM.md` | `~/.pi/agent/APPEND_SYSTEM.md` |
+| Pi | Prompt (`.md`) | `.pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
+| Codex | Skill | `.agents/skills/<name>/` | `~/.agents/skills/<name>/` |
+| Codex | Agent (native `.toml`) | `.codex/agents/<name>.toml` | `~/.codex/agents/<name>.toml` |
+| Codex | Command policy (native `.rules`) | `.codex/rules/<name>.rules` | `~/.codex/rules/<name>.rules` |
+| Codex | Instruction rules (`.md` directory, compiled) | `AGENTS.md` | `~/.codex/AGENTS.md` |
+| Codex | Prompt (legacy `.md`) | Unsupported | `~/.codex/prompts/<name>.md` |
+| Cursor | Skill | `.cursor/skills/<name>/` | `~/.cursor/skills/<name>/` |
+| Cursor | Agent (`.md` with YAML frontmatter) | `.cursor/agents/<name>.md` | `~/.cursor/agents/<name>.md` |
+| Cursor | Rules (native `.mdc`) | `.cursor/rules/<bundle>/` | Unsupported (user rules live in Cursor settings) |
+| Cursor | Prompt / command (`.md`) | `.cursor/commands/<name>.md` | `~/.cursor/commands/<name>.md` |
+| All three | Reference (existing npm documentation flow) | `.agents/references/` + instruction block | `~/.agents/references/` + instruction block |
+
+The other existing harness targets retain skills/references support. New content
+types fail with a clear error for unsupported harnesses, scopes, or formats.
+Formats and prompt arguments are preserved; there is no translation between
+Codex TOML agents and Cursor Markdown agents, or between prompt syntaxes.
+
+These destinations follow [Pi subagents](https://github.com/tintinweb/pi-subagents#custom-agents),
+[Pi configuration](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md),
+[Codex skills](https://learn.chatgpt.com/docs/build-skills),
+[Codex agents](https://learn.chatgpt.com/docs/agent-configuration/subagents),
+[Codex instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md),
+[Codex command policies](https://learn.chatgpt.com/docs/agent-configuration/rules),
+[Codex legacy prompts](https://learn.chatgpt.com/docs/custom-prompts),
+[Cursor agents](https://cursor.com/docs/subagents),
+[Cursor rules](https://cursor.com/docs/rules), and
+[Cursor commands](https://cursor.com/changelog/1-6).
+
+### Pi agent provider
+
+Pi agents use **`@tintinweb/pi-subagents`**. Install the provider in Pi once:
+
+```sh
+pi install npm:@tintinweb/pi-subagents
+```
+
+Then install definitions with Hangar:
+
+```sh
+hangar install ./my-content --type agent -a pi --all
+hangar info agent:reviewer
+hangar update agent:reviewer
+hangar remove agent:reviewer
+```
+
+Definitions are Markdown files with optional YAML frontmatter. Hangar preserves
+provider fields such as `name`, `description`, `tools`, `model`, `thinking`, and
+`max_turns`, plus the system prompt body, using the existing sanitization.
+The provider uses frontmatter `name` when present and the filename otherwise.
+Hangar writes `.pi/agents/` locally and `~/.pi/agent/agents/` globally; it
+manages definitions separately from installing or configuring the provider.
+TOML agent definitions are rejected for Pi. Verified against provider 0.22.0.
+
+### Discover, select, and manage
+
+Sources may contain `agents/*.md` or `agents/*.toml`, `prompts/*.md`,
+`commands/*.md`, and `rules/` directories, including under `.pi`, `.codex`,
+or `.cursor`. Agents and prompts are individual files directly inside those
+directories. Each **outermost** `rules/` directory is one selectable bundle;
+nested rules directories belong to that same bundle. Codex `.rules` policies
+inside `rules/` are separate file entries and install directly into its native
+rules directory; they are never compiled as Markdown. Bundle names use the
+relative directory path with `/` replaced by `-` (for example `rules` or
+`backend-rules`). A source rooted directly at a rules directory uses `rules`.
+Existing skill discovery remains available alongside these entries.
+
+```sh
+hangar list ./my-content --json
+hangar list ./my-content --type prompt
+hangar install ./my-content --type prompt -a pi --all
+hangar install ./my-content --type rule -a pi --all
+hangar install owner/repo#agent:reviewer -a codex
+hangar install ./my-content --type prompt -a codex --global --all
+hangar info prompt:review
+hangar update prompt:review
+hangar remove prompt:review
+```
+
+The picker, preview, review, and installed list display content types. Use
+`kind:name` (`skill`, `ref`, `agent`, `rule`, `prompt`) when names collide;
+ambiguous installed bare names are rejected. `--type` filters installs and
+source/installed listings. Git source `#kind:name` selectors also work; npm's
+`#file` selector retains its reference-document meaning.
+
+New types reuse `.agents/hangar.lock` and canonical `.agents/agents/`,
+`.agents/rules/`, and `.agents/prompts/` stores. The lock records destinations
+and target harnesses so updates and removals work after installation even if
+a harness is not auto-detected. Local definitions and prompts are symlinked;
+global files are copied. Compiled instructions are regular files. New content
+uses the existing skill sanitization (invisible characters removed by default,
+authored comments preserved), including `.mdc`, `.toml`, and `.rules` files.
+
+### Compile rules explicitly
+
+```sh
+# Pi's loaded project instruction location
+hangar compile-rules ./rules ./.pi/APPEND_SYSTEM.md
+
+# Codex's loaded project instruction location
+hangar compile-rules ./rules ./AGENTS.md
+
+# Alternate output, only useful with explicit harness configuration
+hangar compile-rules ./rules ./AGENTS.append.md
+```
+
+`compile-rules <directory> <output-path>` recursively collects every `.md`
+file beneath the directory passed in, including files inside nested `rules/`
+directories. It sorts by relative path, includes each file once, preserves its
+Markdown verbatim, and inserts a blank line between files. Non-Markdown files
+are ignored. It writes one complete output, replacing the previous generated
+content on repeat runs; it never appends to the old output or generates
+separate outputs for nested rules directories.
+
+The output filename must be `APPEND_SYSTEM.md`, `AGENTS.md`, or
+`AGENTS.append.md`, and must be **outside** the source rules directory. Missing
+sources, empty Markdown sets, and write failures return errors. Existing
+unmanaged instruction files are refused. Explicit compilation records ownership
+in `.agents/hangar.lock` **beside the output**; retain that lock to regenerate
+it. Explicit compilations are regenerated with `compile-rules`, separately from
+the install/update/remove lifecycle of discovered content.
+
+Pi loads `.pi/APPEND_SYSTEM.md` locally and
+`~/.pi/agent/APPEND_SYSTEM.md` globally. Its project file takes precedence over
+the global file. A root `APPEND_SYSTEM.md` or `AGENTS.append.md` is not an
+equivalent destination. The Pi install workflow always chooses the loaded
+`APPEND_SYSTEM.md` path; Codex rules choose `AGENTS.md`.
+
+### Prototype limitations
+
+- One compiled rules bundle per harness and scope. Combine rules under one
+  outermost directory before installing. Cursor keeps native `.mdc` rules in a
+  bundle directory; plain `.md` files there are ignored by Cursor. Pi and Codex
+  compilation includes `.md` files only. Codex native `.rules` policies retain
+  their authored Starlark syntax, and project policies require a trusted
+  `.codex` config layer. Hangar does not interpret or convert command policies.
+- No merging into an unmanaged instruction file. Move existing instructions
+  into the source rules directory or choose a separate managed workflow.
+  Keep generated instruction files owned by Hangar; edits belong in the sources.
+- Agent definitions are single native files. Supporting files referenced by
+  agent configurations or prompts are not vendored. Duplicate names within the
+  same content type require selecting a narrower source directory.
+- Codex custom prompts are deprecated and global-only. Use skills for new
+  reusable Codex workflows. Pi agents require the separately installed
+  `@tintinweb/pi-subagents` provider; Hangar does not install the extension or
+  manage its workflows and settings.
+- Default harness locations only; custom `CODEX_HOME` and
+  `PI_CODING_AGENT_DIR` locations are not handled. Reload Pi or restart the
+  relevant harness session after changing resources; trust/configuration can
+  control whether project resources load.
+- Profiles and pin toggles retain their existing behavior. Changing a pinned
+  ref through `hangar pin <name> <ref>` is limited to existing skills/references;
+  install a new source at `@ref` for agents, rules, or prompts. `doctor` retains
+  its existing skills/references checks and does not diagnose new content stores
+  or explicitly compiled outputs.
+- JSON retains the existing `skills` array names for compatibility; entries
+  carry their actual `kind`, including agents, rules, and prompts.
 
 ## Quick start
 

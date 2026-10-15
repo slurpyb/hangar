@@ -145,7 +145,7 @@ func (s *agentsModel) view(app *App) string {
 			chosen++
 		}
 	}
-	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Choose target agents (detected ones are pre-selected)."))
+	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Choose harness applications (detected ones are pre-selected)."))
 
 	visible := s.height(app)
 	end := s.offset + visible

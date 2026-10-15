@@ -16,32 +16,59 @@ func Remove(baseDir, name string, agts []agents.Agent, global bool) (bool, error
 	if err != nil {
 		return false, err
 	}
-	entry, ok := lf.Find(name)
+	entry, ok, err := lf.Lookup(name)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
 		return false, nil
 	}
 
+	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+		for _, dst := range entry.Destinations {
+			target := destinationPath(baseDir, dst)
+			if !global && (entry.Kind != lockfile.KindRule || filepath.Base(filepath.Dir(target)) == "rules") {
+				removeAgentEntry(target, false)
+				continue
+			}
+			if err := os.RemoveAll(target); err != nil {
+				return false, err
+			}
+		}
+		if err := os.RemoveAll(StorePath(baseDir, entry)); err != nil {
+			return false, err
+		}
+		lf.Remove(entry.Key())
+		if err := lf.Save(); err != nil {
+			return false, err
+		}
+		_, err := rebuildReferences(baseDir, lf)
+		return true, err
+	}
+	name = entry.Name
 	canonicalRoot := filepath.Join(baseDir, ".agents", "skills")
 	linkBase := baseDir
 	if global {
 		linkBase = ""
 	}
 
-	for _, ag := range agts {
-		agentSkillsDir := filepath.Join(linkBase, ag.InstallPath)
-		if filepath.Clean(agentSkillsDir) == filepath.Clean(canonicalRoot) {
-			continue // canonical store, handled below
+	if entry.Kind == lockfile.KindSkill {
+		for _, ag := range agts {
+			agentSkillsDir := filepath.Join(linkBase, ag.InstallPath)
+			if filepath.Clean(agentSkillsDir) == filepath.Clean(canonicalRoot) {
+				continue // canonical store, handled below
+			}
+			removeAgentEntry(filepath.Join(agentSkillsDir, name), global)
 		}
-		removeAgentEntry(filepath.Join(agentSkillsDir, name), global)
-	}
 
+	}
 	if entry.Kind == lockfile.KindRef {
 		_ = os.RemoveAll(filepath.Join(baseDir, ".agents", "references", name))
 	} else {
 		_ = os.RemoveAll(filepath.Join(canonicalRoot, name))
 	}
 
-	lf.Remove(name)
+	lf.Remove(entry.Key())
 	if err := lf.Save(); err != nil {
 		return false, err
 	}

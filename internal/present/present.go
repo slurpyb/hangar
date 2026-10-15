@@ -23,6 +23,7 @@ func WriteJSON(w io.Writer, v any) error {
 // ---- list -------------------------------------------------------------------
 
 type ListSkill struct {
+	Kind        string `json:"kind"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Path        string `json:"path"`
@@ -39,7 +40,7 @@ type ListResult struct {
 func List(d *engine.Discovered) ListResult {
 	out := ListResult{Source: d.Source, Ref: d.Ref}
 	for _, s := range d.Skills {
-		out.Skills = append(out.Skills, ListSkill{Name: s.Name, Description: s.Description, Path: s.RelPath})
+		out.Skills = append(out.Skills, ListSkill{Kind: s.Type(), Name: s.Name, Description: s.Description, Path: s.RelPath})
 	}
 	for _, r := range d.References {
 		out.References = append(out.References, r.RelPath)

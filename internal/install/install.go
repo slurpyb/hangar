@@ -119,6 +119,10 @@ func Install(req Request) (Report, error) {
 		return Report{}, err
 	}
 
+	if err := preflightContent(req, lf); err != nil {
+		return Report{}, err
+	}
+
 	canonicalRoot := filepath.Join(req.BaseDir, ".agents", "skills")
 	linkBase := req.BaseDir
 	if req.Options.Global {
@@ -132,6 +136,19 @@ func Install(req Request) (Report, error) {
 	idx := 0
 
 	for _, sk := range req.Skills {
+		if sk.Type() != lockfile.KindSkill {
+			idx++
+			req.emit(Event{Phase: sk.Type(), Name: sk.Name, Index: idx, Total: total})
+			sr, err := installContent(req, lf, sk, op)
+			if err != nil {
+				return rep, err
+			}
+			rep.Skills = append(rep.Skills, sr)
+			for _, name := range sr.InstalledAgents {
+				installedSet[name] = true
+			}
+			continue
+		}
 		idx++
 		req.emit(Event{Phase: "skill", Name: sk.Name, Index: idx, Total: total})
 		canonicalDir := filepath.Join(canonicalRoot, sk.Name)

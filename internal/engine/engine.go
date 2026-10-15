@@ -147,7 +147,7 @@ func (e *Engine) crawl(s spec.SourceSpec, root string) ([]Skill, []discover.RefD
 			}
 			return nil, refs, nil
 		}
-		skills, err := discover.DiscoverSkills(root)
+		skills, err := discover.DiscoverContent(root)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -161,14 +161,14 @@ func (e *Engine) crawl(s spec.SourceSpec, root string) ([]Skill, []discover.RefD
 		return skills, refs, nil
 	}
 
-	skills, err := discover.DiscoverSkills(root)
+	skills, err := discover.DiscoverContent(root)
 	if err != nil {
 		return nil, nil, err
 	}
 	if s.Skill != "" {
 		skills = filterByName(skills, s.Skill)
 		if len(skills) == 0 {
-			return nil, nil, fmt.Errorf("no skill named %q found in %s", s.Skill, sourceLabel(s))
+			return nil, nil, fmt.Errorf("no content named %q found in %s", s.Skill, sourceLabel(s))
 		}
 	}
 	return skills, nil, nil
@@ -177,7 +177,7 @@ func (e *Engine) crawl(s spec.SourceSpec, root string) ([]Skill, []discover.RefD
 func filterByName(skills []Skill, name string) []Skill {
 	var out []Skill
 	for _, s := range skills {
-		if s.Name == name {
+		if s.Name == name || s.Key() == name {
 			out = append(out, s)
 		}
 	}
@@ -204,4 +204,27 @@ func hostLabel(host string) string {
 	host = strings.TrimPrefix(host, "https://")
 	host = strings.TrimPrefix(host, "http://")
 	return host
+}
+
+// Filter keeps one content kind, preserving the existing discovery facade.
+func (d *Discovered) Filter(kind string) error {
+	if kind == "" {
+		return nil
+	}
+	switch kind {
+	case "skill", "ref", "agent", "rule", "prompt":
+	default:
+		return fmt.Errorf("unknown content type %q; choose skill, ref, agent, rule, or prompt", kind)
+	}
+	var selected []Skill
+	for _, sk := range d.Skills {
+		if sk.Type() == kind {
+			selected = append(selected, sk)
+		}
+	}
+	d.Skills = selected
+	if kind != "ref" {
+		d.References = nil
+	}
+	return nil
 }

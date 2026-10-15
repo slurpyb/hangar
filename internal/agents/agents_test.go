@@ -38,16 +38,16 @@ func TestUniversalIsTargetOnly(t *testing.T) {
 	}
 }
 
-func TestPiInstallsIntoAgentsStore(t *testing.T) {
+func TestPiUsesNativeSkillPaths(t *testing.T) {
 	def, _, ok := FindDef("pi")
 	if !ok {
 		t.Fatal("pi not found")
 	}
-	if def.ProjectPath != ".agents/skills" {
-		t.Errorf("pi project path = %q, want .agents/skills", def.ProjectPath)
+	if def.ProjectPath != ".pi/skills" {
+		t.Errorf("pi project path = %q, want .pi/skills", def.ProjectPath)
 	}
-	if def.GlobalPath != ".agents/skills" {
-		t.Errorf("pi global path = %q, want .agents/skills", def.GlobalPath)
+	if def.GlobalPath != ".pi/agent/skills" {
+		t.Errorf("pi global path = %q, want .pi/agent/skills", def.GlobalPath)
 	}
 }
 
