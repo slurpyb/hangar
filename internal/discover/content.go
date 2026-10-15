@@ -32,9 +32,16 @@ func (s Skill) IsRuleFile() bool {
 // DiscoverContent extends skill discovery with native definitions in agents/,
 // prompts/ or commands/, and one bundle per outermost rules/ directory.
 func DiscoverContent(root string) ([]Skill, error) {
-	out, err := DiscoverSkills(root)
+	out, declared, err := discoverPiPackage(root)
 	if err != nil {
 		return nil, err
+	}
+	if !declared[lockfile.KindSkill] {
+		skills, err := DiscoverSkills(root)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, skills...)
 	}
 	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -57,7 +64,7 @@ func DiscoverContent(root string) ([]Skill, error) {
 						break
 					}
 				}
-				if native && !found {
+				if native && !found && !declared[lockfile.KindSkill] {
 					sk, err := loadSkill(root, p)
 					if err != nil {
 						return err
@@ -113,31 +120,14 @@ func DiscoverContent(root string) ([]Skill, error) {
 		if (parent == "prompts" || parent == "commands") && ext == ".md" {
 			kind = lockfile.KindPrompt
 		}
-		if kind == "" {
+		if kind == "" || declared[kind] {
 			return nil
 		}
-		data, err := os.ReadFile(p)
+		sk, err := loadDefinition(root, p, kind)
 		if err != nil {
 			return err
 		}
-		fm, _ := SplitFrontmatter(data)
-		meta := parseMeta(fm)
-		if ext == ".toml" {
-			var agent struct {
-				Name        string
-				Description string
-			}
-			if _, err := toml.Decode(string(data), &agent); err != nil {
-				return fmt.Errorf("parse agent %s: %w", p, err)
-			}
-			meta["name"], meta["description"] = agent.Name, agent.Description
-		}
-		name := strings.TrimSuffix(d.Name(), ext)
-		if kind == lockfile.KindAgent && meta["name"] != "" {
-			name = meta["name"]
-		}
-		rel, _ := filepath.Rel(root, p)
-		out = append(out, Skill{Name: name, Kind: kind, AbsPath: p, RelPath: filepath.ToSlash(rel), Description: meta["description"], FrontmatterRaw: strings.TrimSpace(string(fm))})
+		out = append(out, sk)
 		return nil
 	})
 	if err != nil {
@@ -152,6 +142,29 @@ func DiscoverContent(root string) ([]Skill, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out, nil
+}
+
+func loadDefinition(root, path, kind string) (Skill, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Skill{}, err
+	}
+	fm, _ := SplitFrontmatter(data)
+	meta := parseMeta(fm)
+	ext := filepath.Ext(path)
+	if ext == ".toml" {
+		var agent struct{ Name, Description string }
+		if _, err := toml.Decode(string(data), &agent); err != nil {
+			return Skill{}, fmt.Errorf("parse agent %s: %w", path, err)
+		}
+		meta["name"], meta["description"] = agent.Name, agent.Description
+	}
+	name := strings.TrimSuffix(filepath.Base(path), ext)
+	if kind == lockfile.KindAgent && meta["name"] != "" {
+		name = meta["name"]
+	}
+	rel, _ := filepath.Rel(root, path)
+	return Skill{Name: name, Kind: kind, AbsPath: path, RelPath: filepath.ToSlash(rel), Description: meta["description"], FrontmatterRaw: strings.TrimSpace(string(fm))}, nil
 }
 
 func ReadContent(s Skill) ([]byte, error) {

@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/louisescher/hangar/internal/agents"
+	"github.com/louisescher/hangar/internal/config"
 	"github.com/louisescher/hangar/internal/discover"
 	"github.com/louisescher/hangar/internal/engine"
 	"github.com/louisescher/hangar/internal/install"
@@ -38,6 +39,7 @@ type EngineAPI interface {
 
 	// Installed returns the lockfile entries for the manage screen.
 	Installed(global bool) ([]lockfile.Entry, error)
+	RestoreProfile(context.Context, config.Profile, engine.InstallOptions) (install.Report, error)
 	// CheckUpdates resolves which installed entries are outdated.
 	CheckUpdates(ctx context.Context, global bool) ([]engine.InstalledStatus, error)
 	// Update re-resolves and reinstalls an installed skill ("" = all).

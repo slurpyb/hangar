@@ -450,6 +450,9 @@ func (s *manageModel) rowView(app *App, r manageRow, atCursor bool) string {
 	if v := entryRefLabel(r.entry); v != "" {
 		srcRef += "@" + v
 	}
+	if r.entry.PiRulesFile != "" {
+		srcRef += " [Pi: " + r.entry.PiRulesFile + "]"
+	}
 	srcW := app.width - (2 + mgNameW + 1 + mgKindW + 1 + mgStatusW + 1)
 	src := app.th.faint.Render(truncate(srcRef, maxInt(srcW, 6)))
 

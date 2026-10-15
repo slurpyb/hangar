@@ -16,14 +16,15 @@ import (
 
 // InstallOptions configures a headless install via the engine.
 type InstallOptions struct {
-	Type       string   // optional content-kind filter
-	Agents     []string // explicit agent names; empty => auto-detect
-	Global     bool
-	All        bool   // install every discovered skill
-	Yes        bool   // accept without the interactive picker (take all)
-	BaseDir    string // install root; default cwd (or $HOME when Global)
-	Security   sanitize.Opts
-	OnProgress func(install.Event) // optional progress callback
+	PiRulesFile string   // optional Pi Markdown rules destination filename
+	Type        string   // optional content-kind filter
+	Agents      []string // explicit agent names; empty => auto-detect
+	Global      bool
+	All         bool   // install every discovered skill
+	Yes         bool   // accept without the interactive picker (take all)
+	BaseDir     string // install root; default cwd (or $HOME when Global)
+	Security    sanitize.Opts
+	OnProgress  func(install.Event) // optional progress callback
 }
 
 // Install discovers a source, selects skills (all, the single match, or the
@@ -68,7 +69,7 @@ func (e *Engine) InstallSelected(d *Discovered, s spec.SourceSpec, skills []Skil
 		Skills:     skills,
 		References: buildReferences(s, refs),
 		Agents:     agts,
-		Options:    install.Options{Global: opt.Global, Security: opt.Security},
+		Options:    install.Options{Global: opt.Global, Security: opt.Security, PiRulesFile: opt.PiRulesFile},
 		Meta:       buildMeta(s, d),
 		OnProgress: opt.OnProgress,
 	})

@@ -29,21 +29,22 @@ func stdinIsTTY() bool {
 // runTUI launches the interactive picker. A nil startSpec opens the catalog; a
 // non-nil discovered pre-seeds the picker (skipping the crawl). secOverride,
 // when non-nil, replaces the prefs-derived sanitize options (CLI flags win).
-func runTUI(c *cobra.Command, startSpec *spec.SourceSpec, discovered *engine.Discovered, agentNames []string, global bool, secOverride *sanitize.Opts) error {
+func runTUI(c *cobra.Command, startSpec *spec.SourceSpec, discovered *engine.Discovered, agentNames []string, global bool, secOverride *sanitize.Opts, piRulesFile string) error {
 	prefs, _ := config.LoadPrefs()
 	sec := sanitize.Opts{StripComments: prefs.StripComments, StripInvisible: prefs.StripInvisible}
 	if secOverride != nil {
 		sec = *secOverride
 	}
 	return tui.Run(tui.Options{
-		Engine:     engine.New(),
-		Prefs:      prefs,
-		Global:     global || prefs.Scope == config.ScopeGlobal,
-		Security:   sec,
-		Agents:     agentNames,
-		StartSpec:  startSpec,
-		Discovered: discovered,
-		Ctx:        c.Context(),
+		Engine:      engine.New(),
+		Prefs:       prefs,
+		Global:      global || prefs.Scope == config.ScopeGlobal,
+		Security:    sec,
+		Agents:      agentNames,
+		StartSpec:   startSpec,
+		PiRulesFile: piRulesFile,
+		Discovered:  discovered,
+		Ctx:         c.Context(),
 	})
 }
 
@@ -66,6 +67,8 @@ func runProfilesTUI(c *cobra.Command) error {
 		Engine:   engine.New(),
 		Prefs:    prefs,
 		Profiles: true,
+		Global:   prefs.Scope == config.ScopeGlobal,
+		Security: sanitize.Opts{StripInvisible: prefs.StripInvisible, StripComments: prefs.StripComments},
 		Ctx:      c.Context(),
 	})
 }

@@ -275,7 +275,7 @@ func pickRef(refs []discover.RefDoc, pkg, name string) []discover.RefDoc {
 // returned cleanup releases any such fallback download.
 func (e *Engine) resolveEntry(ctx context.Context, g entryGroup, d *Discovered, entry lockfile.Entry) (skills []Skill, refs []discover.RefDoc, meta install.SourceMeta, cleanup func(), err error) {
 	cleanup = func() {}
-	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+	if entry.PiPackage || entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
 		for _, sk := range d.Skills {
 			if sk.Type() == entry.Kind && sk.RelPath == entry.Subpath && (sk.Name == entry.Name || entry.Kind == lockfile.KindRule) {
 				sk.Name = entry.Name
@@ -396,12 +396,16 @@ func (e *Engine) installEntries(ctx context.Context, baseDir string, entries []l
 					return rep, err
 				}
 			}
+			piRulesFile := opt.PiRulesFile
+			if piRulesFile == "" {
+				piRulesFile = entry.PiRulesFile
+			}
 			sub, installErr := install.Install(install.Request{
 				BaseDir:    baseDir,
 				Skills:     skills,
 				References: buildReferences(g.spec, refs),
 				Agents:     entryAgents,
-				Options:    install.Options{Global: opt.Global, Security: opt.Security},
+				Options:    install.Options{Global: opt.Global, Security: opt.Security, PiRulesFile: piRulesFile},
 				Operation:  audit.OpInstall,
 				Audit:      log,
 				Meta:       meta,
@@ -484,7 +488,7 @@ func (e *Engine) Pin(ctx context.Context, name, ref string, opt InstallOptions) 
 		Skills:     skills,
 		References: buildReferences(s, refs),
 		Agents:     agts,
-		Options:    install.Options{Global: opt.Global, Security: opt.Security},
+		Options:    install.Options{Global: opt.Global, Security: opt.Security, PiRulesFile: opt.PiRulesFile},
 		Meta:       buildMeta(s, d),
 	})
 }
@@ -573,7 +577,7 @@ func (e *Engine) PreviewUpdate(ctx context.Context, name string, opt InstallOpti
 	if err != nil {
 		return "", err
 	}
-	if entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
+	if entry.PiPackage || entry.Kind == lockfile.KindAgent || entry.Kind == lockfile.KindRule || entry.Kind == lockfile.KindPrompt {
 		s.Subpath, s.File, s.Skill = "", "", ""
 	}
 	d, err := e.Discover(ctx, s)
@@ -620,6 +624,9 @@ func (e *Engine) PreviewUpdate(ctx context.Context, name string, opt InstallOpti
 		}
 		oldPath = filepath.Join(baseDir, ".agents", "references", name, "REFERENCE.md")
 	} else {
+		if entry.PiPackage && findSkill(d.Skills, entry.Key()) == nil {
+			return "", fmt.Errorf("%s missing from package declarations", entry.Key())
+		}
 		for i := range d.Skills {
 			if d.Skills[i].Key() == entry.Key() {
 				raw, _ := os.ReadFile(filepath.Join(d.Skills[i].AbsPath, "SKILL.md"))

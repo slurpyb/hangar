@@ -138,6 +138,9 @@ func (s *confirmModel) view(app *App) string {
 
 	fmt.Fprintf(&b, "\n%s %s\n", app.th.faint.Render("scope:"), app.th.accent.Render(scopeValue(app)))
 	fmt.Fprintf(&b, "%s %s\n", app.th.faint.Render("sanitize:"), app.th.accent.Render(sanitizeLabel(app)))
+	if hasPiRules(app) {
+		fmt.Fprintf(&b, "%s %s\n", app.th.faint.Render("Pi rules file:"), app.th.accent.Render(piRulesFileLabel(app)))
+	}
 
 	b.WriteString("\n")
 	b.WriteString(app.helpView(
