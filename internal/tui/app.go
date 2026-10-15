@@ -17,17 +17,18 @@ import (
 
 // Options configures a TUI run.
 type Options struct {
-	Engine     EngineAPI
-	Prefs      config.Prefs
-	Global     bool
-	Security   sanitize.Opts
-	Agents     []string           // explicit agent names from -a (optional)
-	StartSpec  *spec.SourceSpec   // set when launched via `hangar install <spec>`; skips the catalog
-	Discovered *engine.Discovered // pre-fetched source; skips the crawl. Closed by Run.
-	Manage     bool               // start on the manage-installed screen (`hangar list`)
-	Info       bool               // start on the info browser (`hangar info`)
-	Profiles   bool               // start on the profile browser (`hangar profile list`)
-	Ctx        context.Context    // base context (cancelled on SIGINT)
+	PiRulesFile string
+	Engine      EngineAPI
+	Prefs       config.Prefs
+	Global      bool
+	Security    sanitize.Opts
+	Agents      []string           // explicit agent names from -a (optional)
+	StartSpec   *spec.SourceSpec   // set when launched via `hangar install <spec>`; skips the catalog
+	Discovered  *engine.Discovered // pre-fetched source; skips the crawl. Closed by Run.
+	Manage      bool               // start on the manage-installed screen (`hangar list`)
+	Info        bool               // start on the info browser (`hangar info`)
+	Profiles    bool               // start on the profile browser (`hangar profile list`)
+	Ctx         context.Context    // base context (cancelled on SIGINT)
 }
 
 // screen is one step of the flow. Screens read and mutate shared session state
@@ -55,9 +56,10 @@ type App struct {
 	quitting      bool
 
 	// run configuration
-	global   bool
-	security sanitize.Opts
-	agents   []string
+	piRulesFile string
+	global      bool
+	security    sanitize.Opts
+	agents      []string
 
 	// async control for the in-flight operation
 	ctx    context.Context
@@ -139,16 +141,17 @@ func New(opt Options) *App {
 		opt.Security = sanitize.InvisibleOnly
 	}
 	m := &App{
-		eng:       opt.Engine,
-		keys:      defaultKeys(),
-		th:        newTheme(),
-		prefs:     opt.Prefs,
-		glamStyle: "dark", // Run() overrides after querying the terminal
-		baseCtx:   base,
-		global:    opt.Global,
-		security:  opt.Security,
-		agents:    opt.Agents,
-		selection: newSkillSet(),
+		eng:         opt.Engine,
+		keys:        defaultKeys(),
+		th:          newTheme(),
+		prefs:       opt.Prefs,
+		glamStyle:   "dark", // Run() overrides after querying the terminal
+		baseCtx:     base,
+		global:      opt.Global,
+		piRulesFile: opt.PiRulesFile,
+		security:    opt.Security,
+		agents:      opt.Agents,
+		selection:   newSkillSet(),
 	}
 	switch {
 	case opt.Info:

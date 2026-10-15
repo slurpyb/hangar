@@ -66,6 +66,9 @@ func (e *Engine) UpdateNames(ctx context.Context, names []string, opt InstallOpt
 }
 
 func (e *Engine) loadForUpdate(opt InstallOptions) (string, *lockfile.Lockfile, error) {
+	if _, err := install.PiRulesPath(opt.PiRulesFile, opt.Global); err != nil {
+		return "", nil, err
+	}
 	baseDir, err := resolveBaseDir(opt)
 	if err != nil {
 		return "", nil, err
@@ -119,7 +122,8 @@ func (e *Engine) updateTargets(ctx context.Context, baseDir string, targets []lo
 			if s.Kind == spec.KindNPM {
 				current = entry.Version
 			}
-			if s.Kind != spec.KindLocal && d.Ref == current && d.SHA == entry.SHA {
+			changeDestination := opt.PiRulesFile != "" && entry.Kind == lockfile.KindRule && entry.Manifest == ""
+			if !changeDestination && s.Kind != spec.KindLocal && d.Ref == current && d.SHA == entry.SHA {
 				continue
 			}
 
@@ -146,12 +150,16 @@ func (e *Engine) updateTargets(ctx context.Context, baseDir string, targets []lo
 					return rep, err
 				}
 			}
+			piRulesFile := opt.PiRulesFile
+			if piRulesFile == "" {
+				piRulesFile = entry.PiRulesFile
+			}
 			sub, installErr := install.Install(install.Request{
 				BaseDir:    baseDir,
 				Skills:     skills,
 				References: buildReferences(s, refs),
 				Agents:     entryAgents,
-				Options:    install.Options{Global: opt.Global, Security: opt.Security},
+				Options:    install.Options{Global: opt.Global, Security: opt.Security, PiRulesFile: piRulesFile},
 				Operation:  audit.OpUpdate,
 				Audit:      log,
 				Meta:       meta,

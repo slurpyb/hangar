@@ -37,8 +37,9 @@ func (s *installingModel) enter(app *App) tea.Cmd {
 	ch := s.ch
 
 	opt := engine.InstallOptions{
-		Global:   app.global,
-		Security: app.security,
+		Global:      app.global,
+		PiRulesFile: app.piRulesFile,
+		Security:    app.security,
 		OnProgress: func(ev install.Event) {
 			select {
 			case ch <- ev: // best-effort; never block the install on the UI

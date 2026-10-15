@@ -26,8 +26,37 @@ func StorePath(base string, e lockfile.Entry) string {
 	return filepath.Join(base, ".agents", dir, e.Name)
 }
 
+// PiRulesPath resolves a supported instruction filename to Pi's native location.
+func PiRulesPath(filename string, global bool) (string, error) {
+	if filename == "" {
+		filename = "APPEND_SYSTEM.md"
+	}
+	switch filename {
+	case "APPEND_SYSTEM.md", "AGENTS.md", "AGENTS.override.md":
+	default:
+		return "", fmt.Errorf("Pi rules file must be APPEND_SYSTEM.md, AGENTS.md, or AGENTS.override.md")
+	}
+	if global {
+		return filepath.Join(".pi", "agent", filename), nil
+	}
+	if filename == "APPEND_SYSTEM.md" {
+		return filepath.Join(".pi", filename), nil
+	}
+	return filename, nil
+}
+
+func piRulesFile(req Request, lf *lockfile.Lockfile, sk discover.Skill) string {
+	if req.Options.PiRulesFile != "" {
+		return req.Options.PiRulesFile
+	}
+	if prev, ok := lf.Find(sk.Key()); ok && prev.PiRulesFile != "" {
+		return prev.PiRulesFile
+	}
+	return "APPEND_SYSTEM.md"
+}
+
 // contentTarget handles the native conventions of the three supported harnesses.
-func contentTarget(req Request, sk discover.Skill, ag agents.Agent) (string, error) {
+func contentTarget(req Request, lf *lockfile.Lockfile, sk discover.Skill, ag agents.Agent) (string, error) {
 	var target string
 	switch ag.Def.Name {
 	case "codex":
@@ -122,7 +151,7 @@ func contentTarget(req Request, sk discover.Skill, ag agents.Agent) (string, err
 			if _, err := rules.Content(sk.AbsPath); err != nil {
 				return "", err
 			}
-			target = filepath.Join(prefix, "APPEND_SYSTEM.md")
+			return PiRulesPath(piRulesFile(req, lf, sk), req.Options.Global)
 		}
 	}
 	if target == "" {
@@ -141,6 +170,9 @@ func destinationPath(base, dst string) string {
 // preflightContent validates all new combinations and ownership before any
 // install writes, including collisions between selected rule bundles.
 func preflightContent(req Request, lf *lockfile.Lockfile) error {
+	if _, err := PiRulesPath(req.Options.PiRulesFile, req.Options.Global); err != nil {
+		return err
+	}
 	claimed := map[string]string{}
 	for _, sk := range req.Skills {
 		if sk.Type() == lockfile.KindSkill {
@@ -154,7 +186,7 @@ func preflightContent(req Request, lf *lockfile.Lockfile) error {
 			return err
 		}
 		for _, ag := range req.Agents {
-			dst, err := contentTarget(req, sk, ag)
+			dst, err := contentTarget(req, lf, sk, ag)
 			if err != nil {
 				return fmt.Errorf("%s: %w", sk.Key(), err)
 			}
@@ -165,7 +197,7 @@ func preflightContent(req Request, lf *lockfile.Lockfile) error {
 				}
 			}
 			if key, ok := claimed[dst]; ok && key != sk.Key() {
-				return fmt.Errorf("%s and %s share destination %s; install one rules bundle per harness", key, sk.Key(), dst)
+				return fmt.Errorf("%s and %s share destination %s; install one rules bundle per destination", key, sk.Key(), dst)
 			}
 			claimed[dst] = sk.Key()
 			owned := false
@@ -189,6 +221,7 @@ func preflightContent(req Request, lf *lockfile.Lockfile) error {
 
 func installContent(req Request, lf *lockfile.Lockfile, sk discover.Skill, op audit.Operation) (SkillResult, error) {
 	entry := lockfile.Entry{Name: sk.Name, Kind: sk.Type(), Source: req.Meta.Source, Subpath: path.Join(req.Meta.Subpath, sk.RelPath), Ref: req.Meta.Ref, SHA: req.Meta.SHA, Version: req.Meta.Version, Pinned: req.Meta.Pinned, InstalledAt: req.Now}
+	entry.PiPackage = sk.PiPackage
 	store := StorePath(req.BaseDir, entry)
 	if sk.Type() != lockfile.KindRule || sk.IsRuleFile() {
 		entry.Manifest = filepath.Base(sk.AbsPath)
@@ -228,8 +261,9 @@ func installContent(req Request, lf *lockfile.Lockfile, sk discover.Skill, op au
 	}
 	sr := SkillResult{Name: sk.Name, Kind: sk.Type(), FailedAgents: map[string]string{}}
 	installed := storedContent(req.BaseDir, entry, sk)
+	piDestination := ""
 	for _, ag := range req.Agents {
-		dst, err := contentTarget(req, sk, ag)
+		dst, err := contentTarget(req, lf, sk, ag)
 		if err != nil {
 			return sr, err
 		}
@@ -255,22 +289,50 @@ func installContent(req Request, lf *lockfile.Lockfile, sk discover.Skill, op au
 				return sr, err
 			}
 		}
+		if ag.Def.Name == "pi" && sk.Type() == lockfile.KindRule {
+			entry.PiRulesFile = piRulesFile(req, lf, sk)
+			piDestination = dst
+		}
 		entry.Destinations = append(entry.Destinations, dst)
 		entry.Harnesses = append(entry.Harnesses, ag.Def.Name)
 		sr.InstalledAgents = append(sr.InstalledAgents, ag.Def.Name)
 	}
-	// Keep destinations from previous installs into other harnesses.
+	// Retain other harness destinations; moving Pi rules replaces its old path.
+	var stale []string
 	if prev, ok := lf.Find(entry.Key()); ok {
+		if entry.PiRulesFile == "" {
+			entry.PiRulesFile = prev.PiRulesFile
+		}
 		for i, dst := range prev.Destinations {
+			harness := prev.Harnesses[i]
+			if harness == "pi" && piDestination != "" && dst != piDestination {
+				stale = append(stale, dst)
+				continue
+			}
 			found := false
-			for _, current := range entry.Destinations {
-				if current == dst {
+			for j, current := range entry.Destinations {
+				if current == dst && entry.Harnesses[j] == harness {
 					found = true
+					break
 				}
 			}
 			if !found {
 				entry.Destinations = append(entry.Destinations, dst)
-				entry.Harnesses = append(entry.Harnesses, prev.Harnesses[i])
+				entry.Harnesses = append(entry.Harnesses, harness)
+			}
+		}
+	}
+	for _, dst := range stale {
+		retained := false
+		for _, current := range entry.Destinations {
+			if current == dst {
+				retained = true
+				break
+			}
+		}
+		if !retained {
+			if err := os.Remove(destinationPath(req.BaseDir, dst)); err != nil && !os.IsNotExist(err) {
+				return sr, fmt.Errorf("remove previous Pi rules file: %w", err)
 			}
 		}
 	}

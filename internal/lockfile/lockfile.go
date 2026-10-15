@@ -34,6 +34,8 @@ const RelPath = ".agents/hangar.lock"
 type Entry struct {
 	Name         string    `toml:"name"`
 	Manifest     string    `toml:"manifest,omitempty"`
+	PiRulesFile  string    `toml:"pi_rules_file,omitempty"`
+	PiPackage    bool      `toml:"pi_package,omitempty"`
 	Harnesses    []string  `toml:"harnesses,omitempty"`
 	Destinations []string  `toml:"destinations,omitempty"`
 	Source       string    `toml:"source"`            // owner/repo, file://path, or npm:pkg

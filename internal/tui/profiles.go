@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/louisescher/hangar/internal/config"
+	"github.com/louisescher/hangar/internal/engine"
 	"github.com/louisescher/hangar/internal/lockfile"
 )
 
@@ -15,7 +17,7 @@ import (
 
 type profileListModel struct {
 	names         []string
-	counts        map[string]int
+	counts        map[string]string
 	cursor        int
 	offset        int
 	confirmRemove string // profile pending delete confirmation
@@ -35,10 +37,10 @@ func (s *profileListModel) reload(app *App) {
 		return
 	}
 	s.names = names
-	s.counts = make(map[string]int, len(names))
+	s.counts = make(map[string]string, len(names))
 	for _, n := range names {
 		if p, err := config.LoadProfile(n); err == nil {
-			s.counts[n] = len(p.Skills)
+			s.counts[n] = p.Summary()
 		}
 	}
 	if s.cursor >= len(s.names) {
@@ -129,7 +131,7 @@ func (s *profileListModel) view(app *App) string {
 			cursor = app.th.cursor.Render("▸ ")
 			label = app.th.selected.Render(name)
 		}
-		fmt.Fprintf(&b, "%s%-28s %s\n", cursor, label, app.th.faint.Render(fmt.Sprintf("%d entries", s.counts[name])))
+		fmt.Fprintf(&b, "%s%-28s %s\n", cursor, label, app.th.faint.Render(s.counts[name]))
 	}
 
 	b.WriteString("\n")
@@ -152,29 +154,43 @@ func (s *profileListModel) view(app *App) string {
 // ---- profile detail: inspect & prune a profile's entries -------------------
 
 type profileDetailModel struct {
+	profile       config.Profile
 	entries       []lockfile.Entry
 	cursor        int
 	offset        int
 	confirmRemove string // entry name pending removal
 	note          string
+	confirmApply  bool
+	busy          bool
 }
 
 func (s *profileDetailModel) enter(app *App) tea.Cmd {
 	s.confirmRemove = ""
+	s.confirmApply = false
 	s.note = ""
 	p, err := config.LoadProfile(app.profileName)
 	if err != nil {
 		app.err = err
 		return nil
 	}
-	s.entries = p.Skills
+	s.setProfile(p)
 	if s.cursor >= len(s.entries) {
 		s.cursor = max(0, len(s.entries)-1)
 	}
 	return nil
 }
 
-func (s *profileDetailModel) capturing() bool { return s.confirmRemove != "" }
+func (s *profileDetailModel) setProfile(p config.Profile) {
+	s.profile = p
+	s.entries = append([]lockfile.Entry(nil), p.Skills...)
+	for _, pkg := range p.Packages {
+		s.entries = append(s.entries, lockfile.Entry{Name: pkg.Source, Source: pkg.Source, Kind: "package", Harnesses: []string{"pi"}})
+	}
+}
+
+func (s *profileDetailModel) capturing() bool {
+	return s.confirmRemove != "" || s.confirmApply || s.busy
+}
 
 func (s *profileDetailModel) cur() *lockfile.Entry {
 	if s.cursor < 0 || s.cursor >= len(s.entries) {
@@ -184,8 +200,38 @@ func (s *profileDetailModel) cur() *lockfile.Entry {
 }
 
 func (s *profileDetailModel) update(app *App, msg tea.Msg) tea.Cmd {
+	if done, ok := msg.(profileAppliedMsg); ok {
+		s.busy = false
+		if done.err != nil {
+			s.note = "error: " + done.err.Error()
+		} else {
+			s.note = fmt.Sprintf("applied %s: %d content entries, %d Pi packages", s.profile.Name, len(done.report.Skills), len(done.report.Packages))
+			if len(done.report.Gone) > 0 {
+				s.note += fmt.Sprintf("; %d missing from source", len(done.report.Gone))
+			}
+		}
+		return nil
+	}
+	if s.busy {
+		return nil
+	}
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
+		return nil
+	}
+	if s.confirmApply {
+		s.confirmApply = false
+		if k.String() == "y" || key.Matches(k, app.keys.Confirm) {
+			s.busy = true
+			s.note = "applying profile…"
+			ctx := app.startOp()
+			p := s.profile
+			opt := engine.InstallOptions{Global: app.global, Security: app.security}
+			return func() tea.Msg {
+				report, err := app.eng.RestoreProfile(ctx, p, opt)
+				return profileAppliedMsg{report: report, err: err}
+			}
+		}
 		return nil
 	}
 
@@ -204,6 +250,10 @@ func (s *profileDetailModel) update(app *App, msg tea.Msg) tea.Cmd {
 
 	s.note = ""
 	switch {
+	case k.String() == "a":
+		s.confirmApply = true
+	case k.String() == "g":
+		app.global = !app.global
 	case key.Matches(k, app.keys.Up):
 		if s.cursor > 0 {
 			s.cursor--
@@ -230,25 +280,22 @@ func (s *profileDetailModel) removeEntry(app *App, name string) tea.Cmd {
 		s.note = "error: " + err.Error()
 		return nil
 	}
-	kept := make([]lockfile.Entry, 0, len(p.Skills))
-	for _, e := range p.Skills {
-		if e.Key() != name {
-			kept = append(kept, e)
-		}
+	if _, err := p.RemoveEntry(name); err != nil {
+		s.note = "error: " + err.Error()
+		return nil
 	}
-	if len(kept) == 0 {
+	if p.Count() == 0 {
 		if _, err := config.RemoveProfile(app.profileName); err != nil {
 			s.note = "error: " + err.Error()
 			return nil
 		}
 		return func() tea.Msg { return navBackMsg{} } // profile is now empty/gone
 	}
-	p.Skills = kept
 	if err := config.SaveProfile(p); err != nil {
 		s.note = "error: " + err.Error()
 		return nil
 	}
-	s.entries = kept
+	s.setProfile(p)
 	if s.cursor >= len(s.entries) {
 		s.cursor = max(0, len(s.entries)-1)
 	}
@@ -258,7 +305,7 @@ func (s *profileDetailModel) removeEntry(app *App, name string) tea.Cmd {
 
 func (s *profileDetailModel) view(app *App) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", app.th.subtitle.Render("Profile — "+app.profileName))
+	fmt.Fprintf(&b, "%s\n%s\n\n", app.th.subtitle.Render("Profile — "+app.profileName), app.th.faint.Render(s.profile.Summary()+" · "+scopeValue(app)))
 
 	if len(s.entries) == 0 {
 		fmt.Fprintf(&b, "%s\n\n", app.th.faint.Render("  (empty)"))
@@ -267,7 +314,7 @@ func (s *profileDetailModel) view(app *App) string {
 	}
 
 	// Reserve room for the details panel (5), status (1), help (1).
-	visible := app.bodyHeight() - 11
+	visible := app.bodyHeight() - 15
 	if visible < 1 {
 		visible = 1
 	}
@@ -302,6 +349,23 @@ func (s *profileDetailModel) view(app *App) string {
 		if e.Subpath != "" {
 			fmt.Fprintf(&b, "  %s %s\n", app.th.faint.Render("path:  "), e.Subpath)
 		}
+		if len(e.Harnesses) > 0 {
+			fmt.Fprintf(&b, "  harnesses: %s\n", strings.Join(e.Harnesses, ", "))
+		}
+		if e.PiRulesFile != "" {
+			fmt.Fprintf(&b, "  Pi rules: %s\n", e.PiRulesFile)
+		}
+		if e.PiPackage {
+			fmt.Fprintln(&b, "  declared in package.json")
+		}
+		if e.Kind == "package" {
+			for _, pkg := range s.profile.Packages {
+				if pkg.Source == e.Source && len(pkg.Options) > 0 {
+					data, _ := json.Marshal(pkg.Options)
+					fmt.Fprintf(&b, "  options: %s\n", data)
+				}
+			}
+		}
 		if e.Pinned {
 			fmt.Fprintf(&b, "  %s\n", app.th.accent.Render("pinned"))
 		}
@@ -309,6 +373,8 @@ func (s *profileDetailModel) view(app *App) string {
 
 	b.WriteString("\n")
 	switch {
+	case s.confirmApply:
+		fmt.Fprintf(&b, "apply %s to %s? (y/enter to apply, any other key to cancel)\n", app.profileName, scopeValue(app))
 	case s.confirmRemove != "":
 		fmt.Fprintf(&b, "%s%s\n", app.th.errorText.Render("remove "+s.confirmRemove+" from this profile? "), app.th.faint.Render("(y/n)"))
 	case s.note != "":
@@ -318,6 +384,8 @@ func (s *profileDetailModel) view(app *App) string {
 	}
 	b.WriteString(app.helpView(
 		app.keys.Up, app.keys.Down,
+		key.NewBinding(key.WithHelp("a", "apply profile")),
+		key.NewBinding(key.WithHelp("g", "scope")),
 		key.NewBinding(key.WithHelp("x", "remove entry")),
 		app.keys.Back, app.keys.Quit,
 	))

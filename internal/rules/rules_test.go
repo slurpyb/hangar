@@ -27,7 +27,7 @@ func TestCompileRecursiveRepeatAndOwnership(t *testing.T) {
 		}
 	}
 	want := "# General\n<!-- preserve this -->\n\n# API\n\n# Database\n\n# UI"
-	for _, name := range []string{"APPEND_SYSTEM.md", "AGENTS.md", "AGENTS.append.md"} {
+	for _, name := range []string{"APPEND_SYSTEM.md", "AGENTS.md", "AGENTS.override.md", "AGENTS.append.md"} {
 		dst := filepath.Join(base, name)
 		for i := 0; i < 2; i++ {
 			if err := Compile(src, dst); err != nil {

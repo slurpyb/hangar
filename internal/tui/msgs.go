@@ -65,6 +65,11 @@ type installDoneMsg struct {
 	err    error
 }
 
+type profileAppliedMsg struct {
+	report install.Report
+	err    error
+}
+
 // manageStatusMsg delivers the async update-check for installed entries.
 type manageStatusMsg struct{ statuses []engine.InstalledStatus }
 

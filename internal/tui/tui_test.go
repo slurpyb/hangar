@@ -18,11 +18,28 @@ import (
 
 // fakeEngine implements EngineAPI with canned data for driving the TUI in tests.
 type fakeEngine struct {
-	disc         *engine.Discovered
-	installCalls int
-	lastSkills   []engine.Skill
-	checkCalls   int
-	removed      map[string]bool
+	disc               *engine.Discovered
+	installCalls       int
+	lastInstallOptions engine.InstallOptions
+	lastSkills         []engine.Skill
+	checkCalls         int
+	removed            map[string]bool
+	profileCalls       int
+	lastProfile        config.Profile
+	lastProfileOptions engine.InstallOptions
+}
+
+func (f *fakeEngine) RestoreProfile(_ context.Context, p config.Profile, opt engine.InstallOptions) (install.Report, error) {
+	f.profileCalls++
+	f.lastProfile, f.lastProfileOptions = p, opt
+	report := install.Report{}
+	for _, e := range p.Skills {
+		report.Skills = append(report.Skills, install.SkillResult{Name: e.Name, Kind: e.Kind})
+	}
+	for _, pkg := range p.Packages {
+		report.Packages = append(report.Packages, pkg.Source)
+	}
+	return report, nil
 }
 
 func (f *fakeEngine) Parse(raw string) (spec.SourceSpec, error) {
@@ -98,8 +115,9 @@ func (f *fakeEngine) PreviewUpdate(_ context.Context, name string, _ engine.Inst
 }
 func (f *fakeEngine) SetPinned(string, bool, engine.InstallOptions) error { return nil }
 
-func (f *fakeEngine) InstallSelected(_ *engine.Discovered, _ spec.SourceSpec, skills []engine.Skill, _ []discover.RefDoc, agts []agents.Agent, _ engine.InstallOptions) (install.Report, error) {
+func (f *fakeEngine) InstallSelected(_ *engine.Discovered, _ spec.SourceSpec, skills []engine.Skill, _ []discover.RefDoc, agts []agents.Agent, opt engine.InstallOptions) (install.Report, error) {
 	f.installCalls++
+	f.lastInstallOptions = opt
 	f.lastSkills = skills
 	var res []install.SkillResult
 	for _, sk := range skills {
@@ -713,6 +731,58 @@ func TestProfileBrowserInspectAndRemove(t *testing.T) {
 	}
 }
 
+func TestProfileMixedBrowserApplyAndPrune(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	p := config.Profile{Name: "mixed", Skills: []lockfile.Entry{
+		{Name: "check", Kind: "agent", Source: "file:///source", Harnesses: []string{"pi"}, PiPackage: true},
+		{Name: "check", Kind: "prompt", Source: "file:///source", Harnesses: []string{"pi"}},
+		{Name: "rules", Kind: "rule", Source: "file:///source", Harnesses: []string{"pi"}, PiRulesFile: "AGENTS.override.md"},
+	}, Packages: []config.PiPackage{{Source: "npm:@tintinweb/pi-subagents", Options: map[string]any{"skills": []string{}}}}}
+	if err := config.SaveProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeEngine{}
+	m := New(Options{Engine: fake, Profiles: true, Prefs: config.DefaultPrefs()})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.Init()
+	if !strings.Contains(m.View(), "1 package") {
+		t.Fatal(m.View())
+	}
+	_, cmd := m.Update(keyMsg("enter"))
+	pump(m, cmd)
+	m.profileDetail.cursor = 2
+	if !strings.Contains(m.View(), "AGENTS.override.md") || !strings.Contains(m.View(), "harnesses: pi") {
+		t.Fatal(m.View())
+	}
+	m.Update(keyMsg("g"))
+	m.Update(keyMsg("a"))
+	if !m.profileDetail.confirmApply {
+		t.Fatal("apply review missing")
+	}
+	_, cmd = m.Update(keyMsg("enter"))
+	pump(m, cmd)
+	if fake.profileCalls != 1 || !fake.lastProfileOptions.Global || fake.lastProfile.Count() != 4 {
+		t.Fatalf("apply: %#v", fake)
+	}
+	m.profileDetail.cursor = 0
+	m.Update(keyMsg("x"))
+	m.Update(keyMsg("y"))
+	saved, _ := config.LoadProfile(p.Name)
+	if saved.Count() != 3 || saved.Skills[0].Key() != "prompt:check" || len(saved.Packages) != 1 {
+		t.Fatal(saved)
+	}
+	// Removing the last content entry must keep a package-only profile alive.
+	m.profileDetail.removeEntry(m, "prompt:check")
+	m.profileDetail.removeEntry(m, "rule:rules")
+	saved, err := config.LoadProfile(p.Name)
+	if err != nil || saved.Count() != 1 || m.profileDetail.entries[0].Kind != "package" {
+		t.Fatalf("package-only profile: %#v, %v", saved, err)
+	}
+	if !strings.Contains(m.View(), `"skills":[]`) {
+		t.Fatal(m.View())
+	}
+}
+
 func TestTreeFilterAndViewToggleKeepSelection(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	fake := &fakeEngine{disc: sampleDiscovered()}
@@ -729,5 +799,26 @@ func TestTreeFilterAndViewToggleKeepSelection(t *testing.T) {
 	m.Update(keyMsg("t"))
 	if m.selection.count() != before {
 		t.Errorf("view toggle changed selection: %d -> %d", before, m.selection.count())
+	}
+}
+
+func TestPiRulesDestinationOption(t *testing.T) {
+	d := &engine.Discovered{Skills: []engine.Skill{{Name: "rules", Kind: "rule", RelPath: "rules", AbsPath: "/source/rules"}}}
+	fake := &fakeEngine{disc: d}
+	m := New(Options{Engine: fake, Discovered: d, PiRulesFile: "AGENTS.md", Prefs: config.DefaultPrefs()})
+	m.selection.set(skillKey(&d.Skills[0]), true)
+	m.chosen = []engine.Agent{{Def: agents.Def{Name: "pi"}}}
+	m.optionsScr.cursor = optPiRulesFile
+	m.optionsScr.update(m, keyMsg("space"))
+	if m.piRulesFile != "AGENTS.override.md" {
+		t.Fatalf("destination choice: %q", m.piRulesFile)
+	}
+	if !strings.Contains(m.confirmScr.view(m), "AGENTS.override.md") {
+		t.Fatal("review does not show chosen destination")
+	}
+	batch := m.installing.enter(m)().(tea.BatchMsg)
+	batch[len(batch)-1]()
+	if fake.lastInstallOptions.PiRulesFile != "AGENTS.override.md" {
+		t.Fatal("install lost TUI destination choice")
 	}
 }

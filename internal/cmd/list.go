@@ -140,6 +140,9 @@ func listInstalled(c *cobra.Command, global, asJSON bool, contentType string) er
 		if v := st.Latest; v != "" && st.Entry.Pinned {
 			src += "@" + v
 		}
+		if st.Entry.PiRulesFile != "" {
+			src += " [Pi: " + st.Entry.PiRulesFile + "]"
+		}
 		fmt.Fprintf(w, format, truncate24(st.Entry.Name), kind, status, src)
 	}
 	fmt.Fprintf(w, "\n%d installed\n", len(statuses))
