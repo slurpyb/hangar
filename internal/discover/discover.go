@@ -27,6 +27,7 @@ type Skill struct {
 	AbsPath     string // on-disk directory containing the skill
 	Kind        string // empty means skill (backward compatible)
 	IsRef       bool
+	PiPackage   bool // selected by a Pi package manifest
 
 	// FrontmatterRaw is the verbatim YAML frontmatter block (without the ---
 	// fences), preserved for display in the preview pane.

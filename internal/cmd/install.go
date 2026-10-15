@@ -15,6 +15,7 @@ import (
 func newInstallCmd() *cobra.Command {
 	var (
 		contentType string
+		piRulesFile string
 		agentNames  []string
 		global      bool
 		all         bool
@@ -38,6 +39,9 @@ func newInstallCmd() *cobra.Command {
 			"after cloning a repo that commits its lockfile.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			if _, err := install.PiRulesPath(piRulesFile, global); err != nil {
+				return err
+			}
 			eng := engine.New()
 			secOpt := sec.sanitizeOpts()
 
@@ -46,11 +50,12 @@ func newInstallCmd() *cobra.Command {
 				p := newProgress(c.ErrOrStderr(), verbose)
 				p.start()
 				rep, err := eng.Sync(c.Context(), engine.InstallOptions{
-					Type:       contentType,
-					Agents:     agentNames,
-					Global:     global,
-					Security:   secOpt,
-					OnProgress: p.event,
+					Type:        contentType,
+					PiRulesFile: piRulesFile,
+					Agents:      agentNames,
+					Global:      global,
+					Security:    secOpt,
+					OnProgress:  p.event,
 				})
 				p.finish()
 				if err != nil {
@@ -78,26 +83,27 @@ func newInstallCmd() *cobra.Command {
 				}
 				if len(d.Skills) <= 1 {
 					defer d.Close()
-					rep, err := installSelectedHeadless(eng, d, s, agentNames, global, secOpt)
+					rep, err := installSelectedHeadless(eng, d, s, agentNames, global, secOpt, piRulesFile)
 					if err != nil {
 						return err
 					}
 					return outputReport(c, rep, &sec, false)
 				}
 				// Otherwise hand the pre-fetched source to the picker (it Closes d).
-				return runTUI(c, &s, d, agentNames, global, &secOpt)
+				return runTUI(c, &s, d, agentNames, global, &secOpt, piRulesFile)
 			}
 
 			p := newProgress(c.ErrOrStderr(), verbose)
 			p.start()
 			rep, err := eng.Install(c.Context(), s, engine.InstallOptions{
-				Type:       contentType,
-				Agents:     agentNames,
-				Global:     global,
-				All:        all,
-				Yes:        yes,
-				Security:   secOpt,
-				OnProgress: p.event,
+				Type:        contentType,
+				PiRulesFile: piRulesFile,
+				Agents:      agentNames,
+				Global:      global,
+				All:         all,
+				Yes:         yes,
+				Security:    secOpt,
+				OnProgress:  p.event,
 			})
 			p.finish()
 			if err != nil {
@@ -107,6 +113,7 @@ func newInstallCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&piRulesFile, "pi-rules-file", "", "Pi rules: APPEND_SYSTEM.md, AGENTS.md, or AGENTS.override.md; retain recorded choice by default")
 	cmd.Flags().StringVar(&contentType, "type", "", "select skill, ref, agent, rule, or prompt content")
 	cmd.Flags().StringArrayVarP(&agentNames, "agent", "a", nil, "target harness application (repeatable); default: auto-detect")
 	cmd.Flags().BoolVarP(&global, "global", "g", false, "install into ~/ (global) instead of the current project")
@@ -121,7 +128,7 @@ func newInstallCmd() *cobra.Command {
 
 // installSelectedHeadless installs an already-discovered, unambiguous source
 // without a picker, resolving target agents (explicit -a or auto-detected).
-func installSelectedHeadless(eng *engine.Engine, d *engine.Discovered, s spec.SourceSpec, agentNames []string, global bool, secOpt sanitize.Opts) (install.Report, error) {
+func installSelectedHeadless(eng *engine.Engine, d *engine.Discovered, s spec.SourceSpec, agentNames []string, global bool, secOpt sanitize.Opts, piRulesFile string) (install.Report, error) {
 	if len(d.Skills) == 0 && len(d.References) == 0 {
 		return install.Report{}, fmt.Errorf("no selected content found")
 	}
@@ -135,7 +142,7 @@ func installSelectedHeadless(eng *engine.Engine, d *engine.Discovered, s spec.So
 	if err != nil {
 		return install.Report{}, err
 	}
-	return eng.InstallSelected(d, s, d.Skills, d.References, agts, engine.InstallOptions{Global: global, Security: secOpt})
+	return eng.InstallSelected(d, s, d.Skills, d.References, agts, engine.InstallOptions{Global: global, Security: secOpt, PiRulesFile: piRulesFile})
 }
 
 // outputReport renders an install/update report as JSON or plain text, emitting
@@ -151,6 +158,9 @@ func outputReport(c *cobra.Command, rep install.Report, sec *securityFlags, asJS
 
 func printReport(c *cobra.Command, rep install.Report) {
 	w := c.OutOrStdout()
+	for _, source := range rep.Packages {
+		fmt.Fprintf(w, "installed package:%s (Pi)\n", source)
+	}
 	for _, sr := range rep.Skills {
 		if sr.Kind == "ref" {
 			fmt.Fprintf(w, "added reference %s\n", sr.Name)
@@ -168,7 +178,7 @@ func printReport(c *cobra.Command, rep install.Report) {
 	sort.Strings(agentsList)
 	if len(agentsList) > 0 {
 		fmt.Fprintf(w, "\nagents: %v\n", agentsList)
-	} else {
+	} else if len(rep.Skills) > 0 {
 		fmt.Fprintln(w, "\nno agents detected — skills are in .agents/skills/")
 	}
 	if rep.InstalledInstruction != "" {

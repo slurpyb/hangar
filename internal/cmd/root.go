@@ -37,7 +37,7 @@ func newRootCmd() *cobra.Command {
 		// show help (e.g. piped or in CI).
 		RunE: func(c *cobra.Command, args []string) error {
 			if interactive(false) {
-				return runTUI(c, nil, nil, nil, false, nil)
+				return runTUI(c, nil, nil, nil, false, nil, "")
 			}
 			return c.Help()
 		},

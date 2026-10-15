@@ -10,11 +10,12 @@ import (
 
 func newUpdateCmd() *cobra.Command {
 	var (
-		agentNames []string
-		global     bool
-		asJSON     bool
-		verbose    bool
-		sec        securityFlags
+		piRulesFile string
+		agentNames  []string
+		global      bool
+		asJSON      bool
+		verbose     bool
+		sec         securityFlags
 	)
 
 	cmd := &cobra.Command{
@@ -34,10 +35,11 @@ func newUpdateCmd() *cobra.Command {
 			p := newProgress(c.ErrOrStderr(), verbose)
 			p.start()
 			rep, err := eng.Update(c.Context(), name, engine.InstallOptions{
-				Agents:     agentNames,
-				Global:     global,
-				Security:   sec.sanitizeOpts(),
-				OnProgress: p.event,
+				PiRulesFile: piRulesFile,
+				Agents:      agentNames,
+				Global:      global,
+				Security:    sec.sanitizeOpts(),
+				OnProgress:  p.event,
 			})
 			p.finish()
 			if err != nil {
@@ -69,6 +71,7 @@ func newUpdateCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&piRulesFile, "pi-rules-file", "", "change the Pi rules destination: APPEND_SYSTEM.md, AGENTS.md, or AGENTS.override.md")
 	cmd.Flags().StringArrayVarP(&agentNames, "agent", "a", nil, "target agent (repeatable); default: auto-detect")
 	cmd.Flags().BoolVarP(&global, "global", "g", false, "update the global (~/) install")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")

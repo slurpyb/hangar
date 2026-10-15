@@ -17,8 +17,103 @@ import (
 // Profile is a named, portable set of installed entries that can be re-applied
 // to another project.
 type Profile struct {
-	Name   string           `toml:"name"`
-	Skills []lockfile.Entry `toml:"skills"`
+	Name     string           `toml:"name" json:"name"`
+	Skills   []lockfile.Entry `toml:"skills,omitempty" json:"skills"`
+	Packages []PiPackage      `toml:"packages,omitempty" json:"packages,omitempty"`
+}
+
+// PiPackage is a native Pi settings.json package declaration. Options preserve
+// object-form resource filters, including the distinction between [] and absent.
+type PiPackage struct {
+	Source  string         `toml:"source" json:"source"`
+	Options map[string]any `toml:"options,omitempty" json:"options,omitempty"`
+}
+
+func (p Profile) Count() int { return len(p.Skills) + len(p.Packages) }
+
+func (p Profile) Summary() string {
+	counts := map[string]int{}
+	for _, e := range p.Skills {
+		counts[e.Kind]++
+	}
+	counts["package"] = len(p.Packages)
+	var parts []string
+	for _, kind := range []string{"skill", "ref", "agent", "rule", "prompt", "package"} {
+		if n := counts[kind]; n > 0 {
+			label := kind
+			if n != 1 {
+				label += "s"
+			}
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Filter selects one content type without changing the saved profile.
+func (p Profile) Filter(kind string) (Profile, error) {
+	if kind == "" {
+		return p, nil
+	}
+	switch kind {
+	case lockfile.KindSkill, lockfile.KindRef, lockfile.KindAgent, lockfile.KindRule, lockfile.KindPrompt, "package":
+	default:
+		return Profile{}, fmt.Errorf("unknown profile type %q; choose skill, ref, agent, rule, prompt, or package", kind)
+	}
+	selected := Profile{Name: p.Name}
+	for _, entry := range p.Skills {
+		if entry.Kind == kind {
+			selected.Skills = append(selected.Skills, entry)
+		}
+	}
+	if kind == "package" {
+		selected.Packages = p.Packages
+	}
+	return selected, nil
+}
+
+// RemoveEntry removes one typed entry, accepting bare names only when unique.
+func (p *Profile) RemoveEntry(name string) (bool, error) {
+	var matches []string
+	for _, e := range p.Skills {
+		if e.Key() == name {
+			matches = []string{name}
+			break
+		}
+		if e.Name == name {
+			matches = append(matches, e.Key())
+		}
+	}
+	for _, pkg := range p.Packages {
+		key := "package:" + pkg.Source
+		if key == name {
+			matches = []string{key}
+			break
+		}
+		if pkg.Source == name {
+			matches = append(matches, key)
+		}
+	}
+	if len(matches) > 1 {
+		return false, fmt.Errorf("ambiguous profile entry %q; use kind:name", name)
+	}
+	if len(matches) == 0 {
+		return false, nil
+	}
+	key := matches[0]
+	for i, e := range p.Skills {
+		if e.Key() == key {
+			p.Skills = append(p.Skills[:i], p.Skills[i+1:]...)
+			return true, nil
+		}
+	}
+	for i, pkg := range p.Packages {
+		if "package:"+pkg.Source == key {
+			p.Packages = append(p.Packages[:i], p.Packages[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)

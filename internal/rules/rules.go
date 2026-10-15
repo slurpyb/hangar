@@ -76,9 +76,9 @@ func ContentFor(dir, ext string) ([]byte, error) {
 // Ownership is recorded in the existing Hangar lockfile beside the output.
 func Compile(dir, output string) error {
 	switch filepath.Base(output) {
-	case "APPEND_SYSTEM.md", "AGENTS.md", "AGENTS.append.md":
+	case "APPEND_SYSTEM.md", "AGENTS.md", "AGENTS.override.md", "AGENTS.append.md":
 	default:
-		return fmt.Errorf("output must be APPEND_SYSTEM.md, AGENTS.md, or AGENTS.append.md")
+		return fmt.Errorf("output must be APPEND_SYSTEM.md, AGENTS.md, AGENTS.override.md, or AGENTS.append.md")
 	}
 	src, err := filepath.Abs(dir)
 	if err != nil {

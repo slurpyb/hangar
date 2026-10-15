@@ -78,7 +78,7 @@ are linked from the existing managed instruction block.
 | --- | --- | --- | --- |
 | Pi | Skill (`SKILL.md` directory) | `.pi/skills/<name>/` | `~/.pi/agent/skills/<name>/` |
 | Pi | Agent (`.md`, via `@tintinweb/pi-subagents`) | `.pi/agents/<name>.md` | `~/.pi/agent/agents/<name>.md` |
-| Pi | Rules (`.md` directory, compiled) | `.pi/APPEND_SYSTEM.md` | `~/.pi/agent/APPEND_SYSTEM.md` |
+| Pi | Rules (`.md` directory, compiled) | `.pi/APPEND_SYSTEM.md` (default), `AGENTS.md`, or `AGENTS.override.md` | Selected filename under `~/.pi/agent/` |
 | Pi | Prompt (`.md`) | `.pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
 | Codex | Skill | `.agents/skills/<name>/` | `~/.agents/skills/<name>/` |
 | Codex | Agent (native `.toml`) | `.codex/agents/<name>.toml` | `~/.codex/agents/<name>.toml` |
@@ -132,6 +132,57 @@ Hangar writes `.pi/agents/` locally and `~/.pi/agent/agents/` globally; it
 manages definitions separately from installing or configuring the provider.
 TOML agent definitions are rejected for Pi. Verified against provider 0.22.0.
 
+### Pi package manifests
+
+Hangar reads resource declarations from a source root's `package.json`, including
+for npm packages, Git sources, and local directories:
+
+```json
+{
+  "name": "my-pi-content",
+  "pi": {
+    "skills": ["./resources/skills", "!./resources/skills/experimental"],
+    "prompts": ["./resources/prompts/**/*.md", "!draft.md"],
+    "subagents": {
+      "agents": ["./resources/agents", "!./resources/agents/draft.md"]
+    }
+  }
+}
+```
+
+```sh
+hangar install npm:my-pi-content -a pi --all
+hangar install ./my-pi-content -a pi --all
+```
+
+Skill and prompt paths accept directories, files, globs (`*`, `**`, `?`, character
+classes and brace alternatives), and `!` exclusions. Pi's `+path` and `-path`
+overrides select exact declared files; a skill directory can also be the target.
+Skills must use `SKILL.md` directories. Prompts are Markdown files, collected
+recursively from declared directories. Glob discovery skips dot-prefixed paths;
+list those paths directly. Symlink resource roots are unsupported.
+
+Agent declarations follow
+[`@tintinweb/pi-subagents`' package format](https://github.com/tintinweb/pi-subagents/blob/main/docs/packages.md):
+direct files or directories containing immediate `*.md` files, with exact `!`
+exclusions and no globs. The provider's array shorthand and `pi-subagents` key
+are accepted; `pi.subagents` takes precedence when both are supplied.
+
+When a `pi` manifest exists, omitted or empty skill, prompt, and agent declarations
+expose none of that type. Hangar does not scan conventional directories to add
+undeclared resources. Without a Pi manifest, existing directory discovery stays
+available. Rules bundles remain a separate Hangar feature: Pi has no package
+rules field. Declared resources support the same selection, previews, listing,
+updates, sync, and removal as other Hangar content.
+
+This installs selected content files through Hangar's store and lockfile. For
+whole packages with extensions, themes, runtime dependencies, or executable
+workflows, use Pi's native `pi install`. Profiles can capture those package
+registrations and restore them through `pi install`, retaining saved resource
+filters. Direct content installs do not register whole packages or run dependency
+installation. See
+[Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md).
+
 ### Discover, select, and manage
 
 Sources may contain `agents/*.md` or `agents/*.toml`, `prompts/*.md`,
@@ -171,14 +222,53 @@ global files are copied. Compiled instructions are regular files. New content
 uses the existing skill sanitization (invisible characters removed by default,
 authored comments preserved), including `.mdc`, `.toml`, and `.rules` files.
 
+### Choose the Pi rules destination
+
+Use `--pi-rules-file` on `install` or `update` to choose where Pi loads a rules
+bundle. The TUI has the same choice in **Install options**, shown again on the
+review screen.
+
+| Choice | Project location | Behavior |
+| --- | --- | --- |
+| `APPEND_SYSTEM.md` | `.pi/APPEND_SYSTEM.md` | Adds to the system prompt; the trusted project file takes precedence over the global append file. |
+| `AGENTS.md` | `AGENTS.md` | Context instructions; global and ancestor context files can also apply. |
+| `AGENTS.override.md` | `AGENTS.override.md` | Context instructions replacing `AGENTS.md`/`CLAUDE.md` in the same directory. |
+
+With `--global`, all three filenames go under `~/.pi/agent/`. These choices
+follow [Pi's instruction discovery](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md).
+New installations retain `APPEND_SYSTEM.md` as the default. Once installed,
+the lockfile remembers the choice, so updates, lockfile sync, and profile
+application retain it unless explicitly changed.
+
+```sh
+# Put a rules bundle in project context
+hangar install ./my-content --type rule -a pi --all --pi-rules-file AGENTS.md
+
+# Change that installed bundle's destination
+hangar update rule:rules --pi-rules-file AGENTS.override.md
+
+# Subsequent updates retain the choice
+hangar update rule:rules
+```
+
+Changing the destination removes the previous managed Pi output after writing
+the new one, retaining any destination still used by another installed harness.
+An existing unmanaged destination is refused. Separate named bundles can use
+different instruction files, for example one in `AGENTS.md` and another in
+`APPEND_SYSTEM.md`; each destination can be owned by one installed bundle.
+The option applies to complete bundles and does not interpret rule frontmatter.
+
 ### Compile rules explicitly
 
 ```sh
 # Pi's loaded project instruction location
 hangar compile-rules ./rules ./.pi/APPEND_SYSTEM.md
 
-# Codex's loaded project instruction location
+# Project context instructions (Pi or Codex)
 hangar compile-rules ./rules ./AGENTS.md
+
+# Pi context override in the same directory
+hangar compile-rules ./rules ./AGENTS.override.md
 
 # Alternate output, only useful with explicit harness configuration
 hangar compile-rules ./rules ./AGENTS.append.md
@@ -192,8 +282,8 @@ are ignored. It writes one complete output, replacing the previous generated
 content on repeat runs; it never appends to the old output or generates
 separate outputs for nested rules directories.
 
-The output filename must be `APPEND_SYSTEM.md`, `AGENTS.md`, or
-`AGENTS.append.md`, and must be **outside** the source rules directory. Missing
+The output filename must be `APPEND_SYSTEM.md`, `AGENTS.md`,
+`AGENTS.override.md`, or `AGENTS.append.md`, and must be **outside** the source rules directory. Missing
 sources, empty Markdown sets, and write failures return errors. Existing
 unmanaged instruction files are refused. Explicit compilation records ownership
 in `.agents/hangar.lock` **beside the output**; retain that lock to regenerate
@@ -203,13 +293,14 @@ the install/update/remove lifecycle of discovered content.
 Pi loads `.pi/APPEND_SYSTEM.md` locally and
 `~/.pi/agent/APPEND_SYSTEM.md` globally. Its project file takes precedence over
 the global file. A root `APPEND_SYSTEM.md` or `AGENTS.append.md` is not an
-equivalent destination. The Pi install workflow always chooses the loaded
-`APPEND_SYSTEM.md` path; Codex rules choose `AGENTS.md`.
+equivalent destination. Pi installations choose a native destination through
+`--pi-rules-file`; Codex Markdown rules choose `AGENTS.md`.
 
 ### Prototype limitations
 
-- One compiled rules bundle per harness and scope. Combine rules under one
-  outermost directory before installing. Cursor keeps native `.mdc` rules in a
+- One compiled rules bundle per destination file. Combine related rules under
+  one outermost directory, or install separate named bundles to different Pi
+  instruction files. Cursor keeps native `.mdc` rules in a
   bundle directory; plain `.md` files there are ignored by Cursor. Pi and Codex
   compilation includes `.md` files only. Codex native `.rules` policies retain
   their authored Starlark syntax, and project policies require a trusted
@@ -222,13 +313,14 @@ equivalent destination. The Pi install workflow always chooses the loaded
   same content type require selecting a narrower source directory.
 - Codex custom prompts are deprecated and global-only. Use skills for new
   reusable Codex workflows. Pi agents require the separately installed
-  `@tintinweb/pi-subagents` provider; Hangar does not install the extension or
-  manage its workflows and settings.
+  `@tintinweb/pi-subagents` provider. Include its native Pi package in a profile
+  to restore it alongside definitions; direct agent installs do not install it.
+  Hangar does not author workflows or manage the provider's own settings.
 - Default harness locations only; custom `CODEX_HOME` and
   `PI_CODING_AGENT_DIR` locations are not handled. Reload Pi or restart the
   relevant harness session after changing resources; trust/configuration can
   control whether project resources load.
-- Profiles and pin toggles retain their existing behavior. Changing a pinned
+- Changing a pinned
   ref through `hangar pin <name> <ref>` is limited to existing skills/references;
   install a new source at `@ref` for agents, rules, or prompts. `doctor` retains
   its existing skills/references checks and does not diagnose new content stores
@@ -383,7 +475,7 @@ control the envelope with `--audit` / `--no-audit`.
 | `hangar unpin <skill>`                 | Clear a skill's pinned flag                             |
 | `hangar remove <skill>`                | Remove a skill/reference everywhere                     |
 | `hangar nuke [-y]`                     | Remove every installed skill/reference (respects flags) |
-| `hangar profile save\|apply\|list\|rm` | Save and re-apply named skill sets                      |
+| `hangar profile save\|apply\|list\|show\|rm` | Save, inspect, and restore content and Pi package sets |
 | `hangar doctor [--fix]`                | Diagnose and repair drift                               |
 
 Common flags: `-a/--agent` (repeatable target), `-g/--global`, `-A/--all`,
@@ -398,13 +490,63 @@ and **remove** (`x`). Headless or `--json`, it prints the same status.
 
 ### Profiles
 
-Capture the skills installed in a project and re-apply them elsewhere:
+Profiles capture installed skills, references, agent definitions, rules bundles,
+prompts, and native Pi package registrations. Saved entries retain their content
+type, source path, pin, harness targets, package-manifest origin, and Pi rules
+filename. Applying a profile recomputes destinations for the selected local or
+global scope and uses the saved harnesses by default.
 
 ```sh
-hangar profile save backend     # snapshot this project's lockfile
+hangar profile save backend     # snapshot Hangar content and local Pi packages
+hangar profile show backend     # typed entries, harnesses, rules destinations
+hangar profile show backend --json
 cd ../other-project
 hangar profile apply backend    # install the same set here
+
+# Work with just one type
+hangar profile save reviewers --type agent
+hangar profile apply backend --type prompt -a cursor
+hangar profile apply backend --type rule --pi-rules-file APPEND_SYSTEM.md
+hangar profile apply backend --type package
+
+# Edit the saved set without removing installed content
+hangar profile remove backend agent:reviewer
+hangar profile remove backend package:npm:@tintinweb/pi-subagents
+
+# Save from or apply to the global scope
+hangar profile save personal --global
+hangar profile apply personal --global
 ```
+
+`save`, `show`, and `apply` accept `--type skill|ref|agent|rule|prompt|package`.
+`apply -a <harness>` overrides saved content targets; packages require Pi among
+the targets when an override is supplied. Existing skill-only profiles continue
+to load. Older entries without recorded harnesses use normal auto-detection.
+Applying adds or updates the selected entries and leaves other installed content
+in place. `remove <profile>` deletes the profile; adding a typed entry removes
+only that item, deleting the profile if it becomes empty. Shared names require
+`kind:name`.
+
+Whole Pi packages are read from `.pi/settings.json` or, with `--global`,
+`~/.pi/agent/settings.json`. Only that scope's `packages` array is captured;
+other Pi settings and the provider's own configuration are not included. Local
+package paths are saved as absolute paths, so those directories must be accessible
+when restoring. Object-form filters, empty resource arrays, and `autoload` are
+preserved in the profile's `[[packages]]` entries.
+
+Package restoration requires `pi` on PATH and calls `pi install <source> --local --approve`
+for project scope or `pi install <source>` globally. Pi handles downloading,
+dependencies, and package identity; Hangar restores saved resource filters after
+installation while retaining other settings and package declarations. Errors stop
+the apply; earlier successful entries remain installed. The project install uses
+Pi's process-only approval to modify local package configuration, without saving
+a trust decision. Subsequent Pi sessions apply their normal project trust settings.
+See [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md).
+
+On a terminal, `hangar profile list` opens the profile browser: inspect typed
+entries and package options, remove individual items with `x`, toggle the apply
+scope with `g`, or apply the profile with `a`. Standalone `compile-rules` outputs
+are not profile entries; install a discovered rules bundle to include it.
 
 ### Headless & scripting
 

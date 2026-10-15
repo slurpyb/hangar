@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/louisescher/hangar/internal/agents"
@@ -29,8 +30,9 @@ const vendorDepth = 3
 
 // Options controls install behavior.
 type Options struct {
-	Global   bool
-	Security sanitize.Opts
+	PiRulesFile string // empty retains an installed choice, or defaults to APPEND_SYSTEM.md
+	Global      bool
+	Security    sanitize.Opts
 }
 
 // SourceMeta describes the source the skills came from, for lockfile and
@@ -95,6 +97,7 @@ type SkillResult struct {
 // Report summarizes an install run.
 type Report struct {
 	Skills               []SkillResult
+	Packages             []string // native Pi packages restored by a profile
 	InstalledAgents      []string // union across skills
 	FailedAgents         []string // union across skills
 	InstalledInstruction string   // instruction file updated for references, if any
@@ -199,6 +202,14 @@ func Install(req Request) (Report, error) {
 			installedSet[ag.Def.Name] = true
 		}
 
+		harnesses := append([]string(nil), sr.InstalledAgents...)
+		if previous, ok := lf.Find(lockfile.KindSkill + ":" + sk.Name); ok {
+			for _, name := range previous.Harnesses {
+				if !slices.Contains(harnesses, name) {
+					harnesses = append(harnesses, name)
+				}
+			}
+		}
 		lf.Upsert(lockfile.Entry{
 			Name:        sk.Name,
 			Source:      req.Meta.Source,
@@ -209,6 +220,8 @@ func Install(req Request) (Report, error) {
 			InstalledAt: req.Now,
 			Pinned:      req.Meta.Pinned,
 			Kind:        lockfile.KindSkill,
+			PiPackage:   sk.PiPackage,
+			Harnesses:   harnesses,
 		})
 		rep.Skills = append(rep.Skills, sr)
 	}

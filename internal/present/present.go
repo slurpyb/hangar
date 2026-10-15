@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/louisescher/hangar/internal/config"
+
 	"github.com/louisescher/hangar/internal/doctor"
 	"github.com/louisescher/hangar/internal/engine"
 	"github.com/louisescher/hangar/internal/install"
@@ -18,6 +20,33 @@ func WriteJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+type ProfileEntry struct {
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Source      string   `json:"source"`
+	Path        string   `json:"path,omitempty"`
+	Ref         string   `json:"ref,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Pinned      bool     `json:"pinned"`
+	Harnesses   []string `json:"harnesses,omitempty"`
+	PiRulesFile string   `json:"piRulesFile,omitempty"`
+	PiPackage   bool     `json:"piPackage,omitempty"`
+}
+
+type ProfileResult struct {
+	Name     string             `json:"name"`
+	Entries  []ProfileEntry     `json:"entries"`
+	Packages []config.PiPackage `json:"packages,omitempty"`
+}
+
+func Profile(p config.Profile) ProfileResult {
+	out := ProfileResult{Name: p.Name, Entries: []ProfileEntry{}, Packages: p.Packages}
+	for _, e := range p.Skills {
+		out.Entries = append(out.Entries, ProfileEntry{Name: e.Name, Kind: e.Kind, Source: e.Source, Path: e.Subpath, Ref: e.Ref, Version: e.Version, Pinned: e.Pinned, Harnesses: e.Harnesses, PiRulesFile: e.PiRulesFile, PiPackage: e.PiPackage})
+	}
+	return out
 }
 
 // ---- list -------------------------------------------------------------------
@@ -64,6 +93,7 @@ type Finding struct {
 
 type Report struct {
 	Skills          []ResultItem `json:"skills"`
+	Packages        []string     `json:"packages,omitempty"`
 	References      []ResultItem `json:"references,omitempty"`
 	InstalledAgents []string     `json:"installedAgents,omitempty"`
 	FailedAgents    []string     `json:"failedAgents,omitempty"`
@@ -74,6 +104,7 @@ type Report struct {
 // InstallReport builds the JSON view of an install/update report.
 func InstallReport(rep install.Report) Report {
 	out := Report{
+		Packages:        rep.Packages,
 		InstalledAgents: rep.InstalledAgents,
 		FailedAgents:    rep.FailedAgents,
 		Instruction:     rep.InstalledInstruction,
@@ -97,15 +128,16 @@ func InstallReport(rep install.Report) Report {
 // ---- installed (manage / list) ---------------------------------------------
 
 type InstalledEntry struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Source   string `json:"source"`
-	Ref      string `json:"ref,omitempty"`
-	Version  string `json:"version,omitempty"`
-	Pinned   bool   `json:"pinned"`
-	Outdated bool   `json:"outdated,omitempty"`
-	Gone     bool   `json:"gone,omitempty"` // source/skill no longer exists upstream
-	Latest   string `json:"latest,omitempty"`
+	PiRulesFile string `json:"piRulesFile,omitempty"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Source      string `json:"source"`
+	Ref         string `json:"ref,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Pinned      bool   `json:"pinned"`
+	Outdated    bool   `json:"outdated,omitempty"`
+	Gone        bool   `json:"gone,omitempty"` // source/skill no longer exists upstream
+	Latest      string `json:"latest,omitempty"`
 }
 
 // Installed builds the JSON view of installed lockfile entries. statuses may be
@@ -115,7 +147,7 @@ func Installed(statuses []engine.InstalledStatus) []InstalledEntry {
 	for _, st := range statuses {
 		e := st.Entry
 		out = append(out, InstalledEntry{
-			Name: e.Name, Kind: e.Kind, Source: e.Source,
+			Name: e.Name, Kind: e.Kind, Source: e.Source, PiRulesFile: e.PiRulesFile,
 			Ref: e.Ref, Version: e.Version, Pinned: e.Pinned,
 			Outdated: st.Outdated, Gone: st.Gone, Latest: st.Latest,
 		})
